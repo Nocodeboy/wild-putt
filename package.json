@@ -1,0 +1,37 @@
+{
+  "name": "wild-putt",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Wild Putt (¡Embócala!): minigolf en 3D low-poly con hoyos vivos para web y CrazyGames",
+  "homepage": "https://wild-putt.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nocodeboy/wild-putt.git"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "build:dev": "node build.mjs --dev",
+    "typecheck": "tsc --noEmit -p .",
+    "serve": "python3 -m http.server 8765 --bind 127.0.0.1 -d dist",
+    "bot": "tsx tools/bot.ts 10",
+    "daily-table": "tsx tools/daily-table.ts",
+    "deploy:web": "node build.mjs && cd dist/web && npx vercel@latest deploy --prod"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/share": "^8.0.2",
+    "@fontsource/baloo-2": "^5.3.0",
+    "@fontsource/bungee": "^5.3.0",
+    "@types/node": "^26.6.2",
+    "@types/three": "^0.186.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
