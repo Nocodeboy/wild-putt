@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Privacy · Wild Putt</title>
+<title>Privacy · Wild Putt (¡Embócala!)</title>
 <meta name="robots" content="noindex">
 <style>
-  :root { color-scheme: dark; --bg: #173226; --ink: #fff8ee; --muted: #a9c4c8; --accent: #ffc43d; }
+  :root { color-scheme: dark; --bg: #14303a; --ink: #fff8ee; --muted: #a9c4c8; --accent: #ffc43d; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; padding: 32px 16px 48px; }
   main { max-width: 640px; margin: 0 auto; }
   h1 { font-size: 28px; margin: 0 0 8px; }
   h2 { font-size: 19px; margin: 28px 0 6px; color: var(--accent); }
+  hr { border: 0; border-top: 1px solid #2c5260; margin: 36px 0; }
   p, li { color: var(--ink); }
   small, .muted { color: var(--muted); }
   a { color: #4fd1b5; }
@@ -18,27 +19,61 @@
 </head>
 <body>
 <main>
-  <h1>Privacy in Wild Putt (¡Embócala!)</h1>
+  <h1>Privacy in Wild Putt</h1>
+  <p class="muted">Last updated: 3 October 2026 · <a href="#es">Español</a></p>
+
+  <h2>What we record</h2>
+  <p>To learn whether the game is fun and easy to understand, we record anonymous gameplay events: when you start and finish a hole, which course it is, your strokes and par, coins picked up, earned and spent in the shop, ads offered and watched, how long you play and your daily round result. They are linked to a random ID created by your browser (or the Android app), not to your name, email or account. This policy covers every platform: the website (wild-putt.vercel.app), the Android app and CrazyGames.</p>
+  <p>We also record your device’s <strong>language and time zone</strong> (for example “en-US” and “America/Chicago”) when the game is first opened and at the start of each session. It only tells us roughly which country players come from, so we can compare regions; it does not identify you. If you arrive from a link with a campaign tag (for example, from one of our videos), we also record that tag and the website you came from (only its domain, such as “tiktok.com”), to know which posts bring players.</p>
+
+  <h2>What we don’t record</h2>
+  <ul>
+    <li>No sign-up and no personal data.</li>
+    <li>No advertising cookies and no cross-site tracking by us (the Android app’s ads are covered below).</li>
+    <li>We don’t sell or share the data with third parties.</li>
+  </ul>
+
+  <h2>Ads</h2>
+  <p>The web version has no ads. On CrazyGames, once the game is fully launched there, the portal may show video ads (an optional ad for extra coins or a mulligan, and occasionally one between holes). Those ads are served by CrazyGames under <a href="https://www.crazygames.com/privacy-policy" target="_blank" rel="noopener">their privacy policy</a>; we only record that an ad was offered or watched.</p>
+  <p><strong>Android app:</strong> ads by Google AdMob. Most are rewarded videos you choose to watch (a mulligan, double coins, free coins). Now and then an ad plays between holes, never in your first session and never if you bought “No ads”. To show and measure ads and to prevent fraud, AdMob uses your device’s advertising ID and technical data about your phone; Google explains how it uses that data <a href="https://policies.google.com/technologies/partner-sites" target="_blank" rel="noopener">here</a>. In the EEA, the UK and Switzerland the app asks for your consent with Google’s User Messaging Platform before your data is used for personalized ads, and you can change your choice at any time in <strong>Settings → Ad privacy options</strong>. You can also reset or delete your advertising ID in your Android settings.</p>
+
+  <h2>Purchases</h2>
+  <p>In the Android app you can buy “No ads”, the starter pack and coin packs. Payments are processed by Google Play: we never see or store your payment details. “Restore purchases” gets back what you bought with your Google Play account. There are no purchases on the website or on CrazyGames. The Android app asks for internet access, the advertising ID permission (for ads) and Google Play billing (for purchases). Nothing else.</p>
+
+  <h2>Where it is stored</h2>
+  <p>In a Supabase database in the EU (Frankfurt). Your progress (stars, coins, balls, trophies, settings) stays on your device. On CrazyGames it is also saved to your CrazyGames account if you are logged in, so you don’t lose it when you change devices.</p>
+
+  <h2>How to turn it off</h2>
+  <p>In the game: <strong>Settings → Anonymous stats → OFF</strong>. Personalized ads: through the app’s consent choice or your Android settings. If you want us to delete the data linked to your browser or app, write to @nocodeboy on X.</p>
+
+  <hr>
+
+  <h1 id="es">Privacidad en ¡Embócala!</h1>
   <p class="muted">Última actualización: 3 de octubre de 2026</p>
 
   <h2>Qué guardamos</h2>
-  <p>Para saber si el juego se entiende y engancha, registramos datos de juego anónimos: cuándo empiezas y terminas un hoyo, cuántos golpes das, si ganas, cuánto tiempo juegas, tu resultado del reto diario y el idioma y la zona horaria de tu dispositivo (para saber de qué región juegas, sin ubicación exacta). Van asociados a un identificador aleatorio que crea tu navegador; no está ligado a tu nombre, correo ni cuenta. Lo mismo aplica a la web y a la versión de CrazyGames.</p>
+  <p>Para saber si el juego se entiende y engancha, registramos datos de juego anónimos: cuándo empiezas y terminas un hoyo, de qué recorrido es, tus golpes y el par, las monedas que recoges, ganas y gastas en la tienda, los anuncios ofrecidos y vistos, cuánto tiempo juegas y tu resultado del reto diario. Van asociados a un identificador aleatorio que crea tu navegador (o la app de Android); no está ligado a tu nombre, correo ni cuenta. Esta política vale para todas las plataformas: la web (wild-putt.vercel.app), la app de Android y CrazyGames.</p>
+  <p>También guardamos el <strong>idioma y la zona horaria</strong> del dispositivo (por ejemplo, «es-ES» y «Europe/Madrid») al abrir el juego por primera vez y al empezar cada sesión. Solo nos dice de qué país vienen, más o menos, los jugadores, para comparar regiones; no te identifica. Si llegas desde un enlace con etiqueta de campaña (por ejemplo, desde uno de nuestros vídeos), guardamos también esa etiqueta y la web de la que vienes (solo el dominio, como «tiktok.com»), para saber qué publicaciones traen jugadores.</p>
 
   <h2>Qué no guardamos</h2>
   <ul>
     <li>No pedimos registro ni datos personales.</li>
-    <li>No usamos cookies de publicidad ni rastreo entre webs.</li>
+    <li>No usamos cookies de publicidad ni rastreo entre webs (los anuncios de la app de Android, más abajo).</li>
     <li>No vendemos ni compartimos los datos con terceros.</li>
   </ul>
 
+  <h2>Anuncios</h2>
+  <p>La versión web no tiene anuncios. En CrazyGames, cuando el juego esté publicado del todo allí, el portal puede mostrar anuncios de vídeo (uno opcional a cambio de monedas o de un mulligan, y de vez en cuando uno entre hoyos). Esos anuncios los sirve CrazyGames con <a href="https://www.crazygames.com/privacy-policy" target="_blank" rel="noopener">su política de privacidad</a>; nosotros solo registramos que se ofreció o se vio un anuncio.</p>
+  <p><strong>App de Android:</strong> anuncios de Google AdMob. Casi todos son vídeos con recompensa que eliges tú (un mulligan, doble de monedas, monedas gratis). De vez en cuando sale un anuncio entre hoyos, nunca en tu primera sesión y nunca si has comprado «Sin anuncios». Para mostrar y medir los anuncios, y para evitar el fraude, AdMob usa el ID de publicidad del dispositivo y datos técnicos del teléfono; Google explica cómo usa esos datos <a href="https://policies.google.com/technologies/partner-sites" target="_blank" rel="noopener">aquí</a>. En el EEE, el Reino Unido y Suiza la app te pide el consentimiento con la herramienta de Google (UMP) antes de usar tus datos para anuncios personalizados, y puedes cambiar tu elección cuando quieras en <strong>Ajustes → Opciones de privacidad de los anuncios</strong>. Además, en los ajustes de Android puedes restablecer o eliminar el ID de publicidad.</p>
+
+  <h2>Compras</h2>
+  <p>En la app de Android puedes comprar «Sin anuncios», el pack de inicio y packs de monedas. El pago lo procesa Google Play: nosotros no vemos ni guardamos tus datos de pago. «Restaurar compras» recupera lo que hayas comprado con tu cuenta de Google Play. En la web y en CrazyGames no hay compras. La app de Android pide acceso a internet, el permiso del ID de publicidad (para los anuncios) y el de facturación de Google Play (para las compras). Nada más.</p>
+
   <h2>Dónde se guardan</h2>
-  <p>En una base de datos de Supabase. Tu progreso (estrellas, récords, ajustes) se queda en tu dispositivo. En CrazyGames, además, se guarda en tu cuenta de CrazyGames si has iniciado sesión, para que no lo pierdas al cambiar de dispositivo.</p>
+  <p>En una base de datos de Supabase en la UE (Fráncfort). Tu progreso (estrellas, monedas, bolas, trofeos y ajustes) se queda en tu dispositivo. En CrazyGames, además, se guarda en tu cuenta de CrazyGames si has iniciado sesión, para que no lo pierdas al cambiar de dispositivo.</p>
 
   <h2>Cómo desactivarlo</h2>
-  <p>En el juego: <strong>Ajustes → Estadísticas anónimas → OFF</strong>. Si quieres que borremos los datos asociados a tu navegador, escribe a @nocodeboy en X.</p>
-
-  <h2>English</h2>
-  <p><small>Wild Putt records anonymous gameplay events (level start/end, wins, play time, daily score) tied to a random browser ID (web and CrazyGames), with no personal data, no ad cookies and no sharing with third parties. Your progress stays on your device (on CrazyGames it is also saved to your CrazyGames account if you are logged in). Turn the stats off in Settings → Anonymous stats.</small></p>
+  <p>En el juego: <strong>Ajustes → Estadísticas anónimas → NO</strong>. Anuncios personalizados: con el consentimiento de la app o desde los ajustes de Android. Si quieres que borremos los datos asociados a tu navegador o a tu app, escribe a @nocodeboy en X.</p>
 </main>
 </body>
 </html>

@@ -2,48 +2,40 @@
 
 | Documento | De qué va |
 |---|---|
-| [concepto.md](concepto.md) | Ficha de concepto: competencia (PUTTLE), diferencial, recorridos y criterios para matar, iterar o seguir |
+| [concepto.md](concepto.md) | Ficha de concepto: competencia (PUTTLE), diferencial y criterios para matar, iterar o seguir |
+| [diseno-v2.md](diseno-v2.md) | Diseño de la 1.0 (la gira): 12 recorridos y sus mecánicas, ruta de 120 hoyos, generador, par, economía, tienda, anuncios, compras, diario, primer medio minuto, analítica, idiomas y nombre |
+| [dificultad.md](dificultad.md) | Cómo se eligen los hoyos y su par con el bot, y la tabla de resultados |
+| [publicar.md](publicar.md) | Textos y pasos para la web, CrazyGames y Google Play, y el estado de cada sitio |
 
-Lo técnico (estructura, comandos, controles, cómo se hace un hoyo) está en el [README principal](../README.md).
+Lo técnico (estructura, comandos, Android, controles, cómo se hace un hoyo) está en el [README principal](../README.md).
 
-## Estado (3 oct 2026) · Fase 2: prototipo 0.2.0
+## Estado (3 oct 2026) · Fase 4: 1.0.0 lista para publicar
 
-### 0.2.0: gráficos, cámara, animaciones y control
-- **Cámara de seguimiento** detrás de la bola, mirando hacia donde va el camino (no en línea recta al hoyo, porque usa el campo de distancias andando). Al empezar cada hoyo hay un vuelo de presentación desde la bandera hasta la bola; tocar la pantalla lo salta. Al embocar se acerca al hoyo. **Vista general** con el botón de cámara o la tecla C; se guarda en ajustes.
-- **Control:** el tirachinas funciona respecto a la cámara (tirar hacia abajo = golpe hacia delante en pantalla). Tiene una barra de fuerza con porcentaje, una zona muerta que muestra ✕ y cancela si sueltas ahí, curva de fuerza más fina en golpes suaves y vibración cada 25 %. La cámara no gira mientras arrastras. Con teclado: flechas para apuntar y Espacio para cargar la fuerza.
-- **Gráficos:** barandillas finas con postes y remates redondos (antes eran muros gruesos), hoyo real hundido con borde, agua hundida y animada, mar y lava con textura en movimiento, cielo con degradado, tone mapping neutro, sombras suaves, suelo pintado por recorrido (rayas de césped, tablones del barco, arena rastrillada, grietas del hielo, flechas en las pendientes) y oclusión junto a las barandillas.
-- **Animaciones:** putter que se coloca detrás de la bola, retrocede según la fuerza y golpea; bola que se aplasta al chocar y cae al hoyo; bandera que ondea, sube y gira al embocar; puntos de la línea de tiro que avanzan; anillo de fuerza de verde a rojo; cartel con el nombre del hoyo y fundido entre hoyos.
+Germán aprobó la 0.2.0 («Este sí que pasa el corte») y pidió la versión de producción con el patrón de la casa. La 1.0.0 lo tiene todo; falta el OK para publicar y las cuentas que solo puede crear él ([publicar.md](publicar.md) §4 y §6).
 
-### Base (0.1.0)
+### 1.0.0: la gira
+- **12 recorridos, 120 hoyos.** A los 6 del prototipo se suman playa (marea que inunda la arena), templo del sol (túneles), castillo (rastrillos y puente levadizo), ciudad de neón (aceleradores), cañón (rampas y saltos) y base lunar (gravedad baja y pozos de gravedad con agujero negro). Cada uno con su suelo, barandillas, entorno, ambiente y un hoyo de presentación hecho a mano que enseña la mecánica.
+- **Ruta mezclada** con los recorridos abriéndose en los hoyos 1, 2, 5, 9, 14, 21, 27, 35, 44, 55, 67 y 81, dificultad en diente de sierra y un **hoyo de copa** cada 10 (en el par o mejor = trofeo del recorrido; el del 120 es el Trofeo de la Gira).
+- **Generador** de hoyos por plantillas con las mecánicas de cada recorrido; el bot elige el diseño y mide el par de los 120 ([dificultad.md](dificultad.md)). Pares 2:25, 3:62, 4:30, 5:3.
+- **Estrellas por hoyo:** 3 bajo par, 2 en el par, 1 acabado; se recoge la bola en par + 3.
+- **Economía:** monedas por hoyo (más por estrellas, hoyo en uno y monedas del green; doble en los hoyos de copa), x2 con anuncio, monedas gratis (3 al día), tienda con 12 bolas con estela y la línea de tiro en 3 niveles (el último enseña el segundo rebote), **mulligan** (repetir el último golpe una vez por hoyo, por 100 monedas o un anuncio).
+- **Anuncios y compras** con el módulo de *Put It Out!*: AdMob con UMP y Play Billing en Android (5 productos), anuncios de CrazyGames detrás de `CG_ADS`, intersticial solo en *Siguiente* con sus topes. La web va sin anuncios ni compras.
+- **Trofeos** con vitrina e imagen para compartir; **More games** con los otros tres juegos.
+- **Reto diario** de 6 hoyos de la gira, de recorridos distintos, con modificador y ranking.
+- **Primer medio minuto** (lecciones de los rechazos de CrazyGames): *Play* lleva directo al hoyo 1, hoyo 1 con embudo, anillo y flecha de guía hasta el primer golpe.
+- **6 idiomas** (inglés, español, portugués, francés, alemán e italiano).
+- **Android** (Capacitor, `com.nocodeboy.wildputt`): compila en debug; la release espera los ids reales de AdMob y la clave de subida.
+- **Tienda:** iconos, `og.png`, portadas de CrazyGames, gráficos y 6 capturas de Play, vídeos de vista previa y política de privacidad con AdMob y compras.
+- **Analítica:** fila `wildputt` en la tabla `games` del Supabase del estudio (`level1 = 'L1'`, `result_prop = 'strokes'`).
+- Pruebas: `tools/test_monetize.py`, `tools/test_cg_sdk.py` (con y sin `--ads`) y `tools/test_cg_data.py` pasan.
 
-Hecho:
-- **Física de la bola** (`src/sim/world.ts`): fricción según el suelo (green, arena, hielo), pendientes, rebotes en paredes con esquinas, setas que impulsan, aspas que giran y empujan, bloques que se deslizan, captura en el hoyo con «lip out» si llega rápida y +1 por agua, vacío o lava.
-- **Hoyos vivos:** la cubierta del barco se inclina con el tiempo (la bola se va al lado que baja) y en el volcán la lava avanza con cada golpe, sin llegar nunca a tapar el hoyo.
-- **6 recorridos × 3 hoyos** (jardín, tejados, barco pirata, feria, glaciar, volcán), cada uno con su regla, y **reto diario** de 6 hoyos (uno de cada recorrido) con un modificador: clásico, greens helados, hierba alta, viento, espejo u hoyos pequeños. Los 120 primeros retos están comprobados por el bot.
-- **Bot** que simula cientos de putts por golpe desde el instante exacto en que golpea (tiene en cuenta lo que se mueve). Mide la dificultad, valida el diario y juega detrás del menú (repartiendo el cálculo entre fotogramas para no congelar el móvil).
-- Tirachinas a un pulgar con línea de puntos hasta el primer rebote y color según la fuerza; teclado.
-- Tarjeta de puntuación por hoyo (círculo bajo par, dorado si es hoyo en uno), «¡Birdie!», público que aplaude más cuanto mejor es el golpe, compartir sin spoilers con un cuadro por hoyo.
-- Escenario de cada recorrido: jardín con valla, edificios alrededor del tejado (y la calle 9 m más abajo), mar con mástiles y velas, feria de noche con bombillas y noria, glaciar con abetos nevados, volcán con grietas de lava.
-- Inglés por defecto y español. Música generada con IA en Magnific (Lyria 3 Pro): lounge-funk para jugar y bossa nova para el menú. Efectos y ambiente sintetizados por recorrido.
-- Analítica en el Supabase del estudio con `game = 'wildputt'`: `level_start` / `level_complete` por hoyo (para el embudo), `course_complete`, `daily_*`, idioma y zona horaria.
-- Iconos, `og.png` y portadas de CrazyGames generados desde el juego (`tools/assets.py`). Son mejorables: en las portadas el título tapa la bandera.
+### Antes (prototipo)
+- **0.2.0:** cámara de seguimiento con vuelo de presentación y vista general, tirachinas relativo a la cámara con barra de fuerza y zona de cancelar, barandillas finas, hoyo hundido, agua y lava animadas, putter animado, bandera y fundidos.
+- **0.1.0:** física de la bola, hoyos vivos (barco que se inclina, lava que avanza), 6 recorridos de 3 hoyos, reto diario, bot, tarjeta de puntuación y compartir sin spoilers, música con IA y efectos sintetizados.
 
-### Dificultad medida con el bot casual (6 partidas por hoyo, 3 oct 2026)
-
-La 0.2.0 no toca la física: el bot da los mismos resultados. El bot casual falla unos 4° y un 15 % de fuerza. Una persona que juega por primera vez lo hará peor, así que una media algo por debajo del par es lo que buscamos.
-
-| Recorrido | Hoyo 1 | Hoyo 2 | Hoyo 3 |
-|---|---|---|---|
-| Jardín | 1,67 (par 2) | 2,33 (par 3) | 2,33 (par 3) |
-| Tejados | 1,83 (par 2) | 1,67 (par 3) | 2,33 (par 3) |
-| Barco | 1,50 (par 2) | 2,17 (par 3) | 2,17 (par 3) |
-| Feria | 2,00 (par 2) | 2,50 (par 3) | 3,67 (par 3) |
-| Glaciar | 1,50 (par 2) | 2,83 (par 3) | 1,83 (par 3) |
-| Volcán | 1,33 (par 2) | 3,33 (par 3) | 2,83 (par 3) |
-
-Pendiente, en este orden:
-1. **Jugarlo 5 minutos** (Germán) y decidir si se siente «otro minigolf más» o tiene chispa. Ojo con la cámara de seguimiento frente a la vista general, la fuerza del tirachinas y la sensación del barco.
-2. Repo privado `Nocodeboy/wild-putt`, catálogo del estudio y fila en la tabla `games` del Supabase.
-3. Web en Vercel (`wild-putt.vercel.app`, ya puesta en la build).
-4. Más hoyos por recorrido (el objetivo es 9) si el test lo justifica; portadas, icono y `og.png` regenerados con el aspecto de la 0.2.0.
-5. Prueba con 5 personas y CrazyGames Basic Launch con los criterios de `concepto.md`.
+### Pendiente, en este orden
+1. **Germán:** crear el repositorio privado vacío `Nocodeboy/wild-putt` (hago el push), jugar 5 minutos a la 1.0.0 y dar el OK para publicar.
+2. **Web** en Vercel y **CrazyGames** (Basic Launch, sin anuncios): con su OK.
+3. **Google Play:** AdMob (app y dos bloques), clave de subida, crear la app en Play Console y enviar a revisión con su OK.
+4. Añadir *Wild Putt* a los «More games» de los otros juegos y a la página del estudio.
+5. Medir con personas: embudo de los primeros hoyos, golpes frente a par y uso del mulligan.

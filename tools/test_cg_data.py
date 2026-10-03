@@ -6,7 +6,7 @@ import json
 from playwright.async_api import async_playwright
 
 URL = 'http://127.0.0.1:8765/crazygames/index.html'
-KEY = 'wildputt.v1'
+KEY = 'wildputt.v2'
 
 
 def mock(cloud):
@@ -41,12 +41,12 @@ async def run(p, name, cloud, local):
 async def main():
     async with async_playwright() as p:
         # 1) Returning player on another device: portal copy has 7 stars and English, local is empty
-        cloud_save = {'v': 1, 'stars': {'bar': 3, 'terraza': 3, 'poligono': 1}, 'best': {}, 'daily': {}, 'streak': {'count': 0, 'last': ''},
+        cloud_save = {'v': 2, 'stars': {'L1': 3, 'L2': 3, 'L3': 1}, 'best': {'L1': 1, 'L2': 2, 'L3': 4}, 'daily': {}, 'streak': {'count': 0, 'last': ''}, 'coins': 420,
                       'settings': {'sfx': True, 'music': True, 'vibration': True, 'gfx': 'auto', 'autoTier': None, 'lang': 'en', 'stats': True},
                       'tutorialDone': True, 'firstOpen': False, 'seenTips': []}
         await run(p, 'cloud wins', {KEY: json.dumps(cloud_save)}, None)
         # 2) First time on the portal build but played before in this browser: local save is copied in
-        local_save = dict(cloud_save, stars={'bar': 2}, settings=dict(cloud_save['settings'], lang='es'))
+        local_save = dict(cloud_save, stars={'L1': 2}, best={'L1': 2}, settings=dict(cloud_save['settings'], lang='es'))
         await run(p, 'migrate local', {}, local_save)
         # 3) Brand-new player: fresh save is written to the portal store
         await run(p, 'new player', {}, None)

@@ -2478,3 +2478,14 @@ table.card {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+/* long titles (German compounds): smaller, and they may break */
+.panel-head h2 {
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
+.panel-head h2.fit1 {
+  font-size: clamp(24px, 7vw, 34px);
+}
+.panel-head h2.fit2 {
+  font-size: clamp(20px, 6vw, 28px);
+}

@@ -1,4 +1,5 @@
-export type Lang = 'es' | 'en';
+export type Lang = 'es' | 'en' | 'pt' | 'fr' | 'de' | 'it';
+export const LANGS: Lang[] = ['en', 'es', 'pt', 'fr', 'de', 'it'];
 export type Txt = { es: string; en: string };
 
 /** The 12 courses of the world tour, in the order they open (docs/diseno-v2.md §5.1). */

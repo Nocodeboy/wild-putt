@@ -125,6 +125,9 @@ const GENERIC: Txt[] = [
   { en: 'Press the camera button to see the whole hole.', es: 'Pulsa el botón de la cámara para ver el hoyo entero.' },
 ];
 
+/** The tips of the route (for tools/strings.ts). */
+export const ROUTE_TIPS: Txt[] = [CHAMP_TIP, ...GENERIC];
+
 function tipFor(L: RouteLevel, c: CourseDef): Txt {
   if (L.intro) return c.tip;
   if (L.champ) return CHAMP_TIP;

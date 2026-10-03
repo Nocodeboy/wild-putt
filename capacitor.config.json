@@ -1,0 +1,10 @@
+{
+  "appId": "com.nocodeboy.wildputt",
+  "appName": "Wild Putt",
+  "webDir": "dist/android",
+  "backgroundColor": "#1f3a2a",
+  "android": {
+    "backgroundColor": "#1f3a2a",
+    "allowMixedContent": false
+  }
+}

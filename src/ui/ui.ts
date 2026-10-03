@@ -1,4 +1,5 @@
-import { fmtPar, gameName, getLang, num, scoreName, t, tx } from '../i18n';
+import { fmtPar, gameName, getLang, LANG_NAME, num, scoreName, t, tx } from '../i18n';
+import { LANGS, type Lang } from '../sim/types';
 import type { EdgeMark, Label } from '../render/view';
 import type { Stage } from '../render/stage';
 import { hexStr, THEMES } from '../render/themes';
@@ -298,7 +299,7 @@ export function holeIntroScreen(o: HoleIntroOpts) {
   <div class="screen dim">
     <div class="panel intro${o.champ ? ' champ' : ''}">
       <div class="tape"></div>
-      <div class="panel-head"><div class="eyebrow">${esc(o.eyebrow)}</div><h2>${esc(o.title)}</h2></div>
+      <div class="panel-head"><div class="eyebrow">${esc(o.eyebrow)}</div><h2 class="${fit(o.title, 13)}">${esc(o.title)}</h2></div>
       <div class="panel-body">
         ${o.course ? `<div class="region-card" style="--c:${o.color}"><span class="rc-ic">${COURSE_IC[o.courseId] ?? ''}</span><div><small>${t('newCourse')}</small><b>${esc(o.course.star)}</b></div></div>` : ''}
         ${o.champ ? `<div class="region-card champ-card" style="--c:#ffc43d"><span class="rc-ic">${IC.trophy}</span><div><small>${t('cupHole')}</small><b>${esc(t('cupCard', { t: o.champ.trophy }))}</b></div></div>` : ''}
@@ -633,8 +634,10 @@ export interface SettingsOpts {
   privacyUrl?: string;
   version?: string;
   gfx: 'auto' | 'high' | 'medium' | 'low';
-  lang: 'es' | 'en';
+  lang: Lang;
   onChange: (k: string, v: string | boolean) => void;
+  /** Android in the EEA/UK: change the ad consent (Google UMP) */
+  onAdChoices?: () => void;
   onReset: () => void;
   onBack: () => void;
 }
@@ -651,7 +654,8 @@ export function settingsScreen(o: SettingsOpts) {
         <div class="setting"><span>${t('vibration')}</span>${tog('vibration', o.vibration)}</div>
         <div class="setting"><span>${t('stats')}<small class="muted" style="display:block;font-size:13px;font-weight:600">${t('statsNote')}</small></span>${tog('stats', o.stats)}</div>
         <div class="setting"><span>${t('quality')}</span><button class="toggle" data-k="gfx" data-v="${o.gfx}" id="set-gfx">${t(('gfx_' + o.gfx) as 'gfx_auto')}</button></div>
-        <div class="setting"><span>${t('language')}</span><button class="toggle" data-k="lang" id="set-lang">${o.lang === 'es' ? 'Español' : 'English'}</button></div>
+        <div class="setting"><span>${t('language')}</span><button class="toggle" data-k="lang" data-v="${o.lang}" id="set-lang">${LANG_NAME[o.lang]}</button></div>
+        ${o.onAdChoices ? `<button class="linkbtn" data-a="adchoices">${t('adChoices')}</button>` : ''}
         <div class="actions">
           <button class="btn ghost" data-a="back" data-focus>${IC.back}${t('back')}</button>
           <button class="btn ghost" data-a="reset" style="color:#ffb8ae">${t('reset')}</button>
@@ -670,7 +674,7 @@ export function settingsScreen(o: SettingsOpts) {
         b.textContent = t(('gfx_' + v) as 'gfx_auto');
         o.onChange(k, v);
       } else if (k === 'lang') {
-        const v = b.textContent === 'Español' ? 'en' : 'es';
+        const v = LANGS[(LANGS.indexOf(b.dataset.v as Lang) + 1) % LANGS.length];
         o.onChange(k, v);
       } else {
         const on = !b.classList.contains('on');
@@ -680,6 +684,7 @@ export function settingsScreen(o: SettingsOpts) {
       }
     }),
   );
+  n.querySelector('[data-a=adchoices]')?.addEventListener('click', () => o.onAdChoices?.());
   let armed = false;
   const rb = n.querySelector<HTMLElement>('[data-a=reset]')!;
   rb.addEventListener('click', () => {

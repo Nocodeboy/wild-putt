@@ -4,7 +4,7 @@ import { audio, vibrate } from './audio';
 import { gameLink, MORE_GAMES } from './crosspromo';
 import { AIM_LEN, ballById, buyAim, buyBall, claimFreeCoins, dailyCoins, FREE_COINS, freeCoinsLeft, holeCoins, MULLIGAN_COST, takeDailyReward } from './economy';
 import { detectLang, fmtPar, gameName, getLang, num, scoreName, setLang, t, tx } from './i18n';
-import { adBusy, buy, canReward, hasStore, initMonetize, maybeInterstitial, noteLevelEnd, restorePurchases, showRewarded, storeProducts, type Delivered } from './monetize';
+import { adBusy, buy, canReward, hasStore, initMonetize, maybeInterstitial, noteLevelEnd, openPrivacyOptions, privacyOptionsAvailable, restorePurchases, showRewarded, storeProducts, type Delivered } from './monetize';
 import type { ProductId } from './monetize/types';
 import { IC } from './ui/icons';
 import { shopScreen } from './ui/shop';
@@ -16,7 +16,7 @@ import { Bot, SKILL_DEMO, SKILL_PRO } from './sim/bot';
 import { dayKey, makeDaily, type Daily } from './sim/daily';
 import { DAILY_SALTS } from './sim/dailyTable';
 import { champLevel, courseById, holeDef, READY, ROUTE, ROUTE_LEN, FULL_LEN } from './sim/route';
-import type { HoleDef, HoleMods, SimEvent, ThemeId } from './sim/types';
+import type { HoleDef, HoleMods, Lang, SimEvent, ThemeId } from './sim/types';
 import { Sim, SIM_DT } from './sim/world';
 import * as store from './storage';
 import type { Settings } from './storage';
@@ -139,7 +139,7 @@ if (save.firstOpen) {
   store.save();
 }
 track('session_start', { stars: store.totalStars(), coins: save.coins, ...localeProps(), ...sourceProps() });
-document.title = getLang() === 'es' ? '¡Embócala! · Minigolf' : 'Wild Putt · Mini golf';
+document.title = t('pageTitle');
 buildHud(pauseGame, toggleCamera, offerMulligan);
 input.onPause = pauseGame;
 input.onCamera = toggleCamera;
@@ -569,6 +569,7 @@ function showSettings() {
     version: typeof __VERSION__ !== 'undefined' ? __VERSION__ : '',
     gfx: st.gfx ?? 'auto',
     lang: getLang(),
+    onAdChoices: privacyOptionsAvailable() ? () => void openPrivacyOptions() : undefined,
     onChange: (k, v) => {
       if (k === 'sfx') {
         st.sfx = v as boolean;
@@ -587,8 +588,9 @@ function showSettings() {
         stage.setTier(effectiveTier());
         fps.t = fps.n = fps.slow = fps.fast = 0;
       } else if (k === 'lang') {
-        st.lang = v as 'es' | 'en';
+        st.lang = v as Lang;
         setLang(st.lang);
+        document.title = t('pageTitle');
         buildHud(pauseGame, toggleCamera, offerMulligan);
         store.save();
         showSettings();

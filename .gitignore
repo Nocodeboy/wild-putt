@@ -1,26 +1,23 @@
-# Dependencias
-node_modules/
-
-# Salidas generadas (se rehacen con node build.mjs y tools/*.py)
-dist/
-build/
-shots/
-
-# Firma de Android (cuando vuelva la app): NUNCA al repositorio
-*.jks
-*.keystore
-keystore.properties
-android/keystore/
 
 # Configuración local y de despliegue
+# Dependencias
+# Firma de Android (cuando vuelva la app): NUNCA al repositorio
+# Salidas generadas (se rehacen con node build.mjs y tools/*.py)
+# Varios
+*.jks
+*.keystore
+*.log
+*.pyc
+.DS_Store
 .env
 .env.*
 .vercel/
-local.properties
-
-# Varios
-__pycache__/
-*.pyc
-*.log
-.DS_Store
 Thumbs.db
+__pycache__/
+android/keystore/
+build/
+dist/
+keystore.properties
+local.properties
+node_modules/
+shots/

@@ -1,6 +1,12 @@
-import type { Lang, Txt } from './sim/types';
+import { LANGS, type Lang, type Txt } from './sim/types';
+import de from './locales/de.json';
+import fr from './locales/fr.json';
+import it from './locales/it.json';
+import pt from './locales/pt.json';
 
 const S = {
+  gameName: { es: '¡Embócala!', en: 'Wild Putt' },
+  pageTitle: { es: '¡Embócala! · Minigolf', en: 'Wild Putt · Mini Golf Tour' },
   play: { es: 'JUGAR', en: 'PLAY' },
   continue: { es: 'CONTINUAR', en: 'CONTINUE' },
   levels: { es: 'Recorridos', en: 'Courses' },
@@ -71,6 +77,7 @@ const S = {
   studio: { es: 'nocodeboy games', en: 'nocodeboy games' },
   playFree: { es: 'Jugar gratis', en: 'Play free' },
   newBall: { es: '¡Bola nueva!', en: 'New ball!' },
+  adChoices: { es: 'Opciones de privacidad de los anuncios', en: 'Ad privacy options' },
   daily: { es: 'Reto diario', en: 'Daily round' },
   settings: { es: 'Ajustes', en: 'Settings' },
   camera: { es: 'Cambiar cámara (C)', en: 'Switch camera (C)' },
@@ -150,34 +157,95 @@ const S = {
 } satisfies Record<string, Txt>;
 
 export type Key = keyof typeof S;
+/** Every UI text (for tools/strings.ts). */
+export const STRINGS: Record<string, Txt> = S;
+
+/** Locale for numbers and dates (Brazilian Portuguese: Brazil is by far the largest Portuguese-speaking audience). */
+export const LOCALE: Record<Lang, string> = { en: 'en-US', es: 'es-ES', pt: 'pt-BR', fr: 'fr-FR', de: 'de-DE', it: 'it-IT' };
+/** Each language in its own name (the language setting). */
+export const LANG_NAME: Record<Lang, string> = { en: 'English', es: 'Español', pt: 'Português', fr: 'Français', de: 'Deutsch', it: 'Italiano' };
+
+/**
+ * Portuguese, French, German and Italian: dictionaries from the English text to the translation (`src/locales/`,
+ * the list of texts comes from tools/strings.ts). Any text missing from them falls back to English.
+ */
+const DICT: Partial<Record<Lang, Record<string, string>>> = { pt, fr, de, it };
 
 let lang: Lang = 'en';
 export function setLang(l: Lang) {
-  lang = l;
-  document.documentElement.lang = l;
+  lang = LANGS.includes(l) ? l : 'en';
+  document.documentElement.lang = lang;
 }
 export function getLang(): Lang {
   return lang;
 }
-/** English first: Spanish only for devices set to Spanish (or Catalan, Galician, Basque). */
+/**
+ * English first (the studio's main language). Spanish when the device's language is Spanish, or one of the other
+ * languages of Spain (Catalan, Galician, Basque), whose speakers all read Spanish; Portuguese, French, German and
+ * Italian when the device is in one of them.
+ */
 export function detectLang(): Lang {
-  const n = (navigator.language || 'en').toLowerCase();
-  return n.startsWith('es') || n.startsWith('ca') || n.startsWith('gl') || n.startsWith('eu') ? 'es' : 'en';
+  const langs = (navigator.languages?.length ? navigator.languages : [navigator.language || 'en']).map((l) => (l || '').toLowerCase());
+  const first = langs[0] ?? 'en';
+  if (first.startsWith('es') || first.startsWith('ca') || first.startsWith('gl') || first.startsWith('eu')) return 'es';
+  for (const l of ['pt', 'fr', 'de', 'it'] as const) if (first.startsWith(l)) return l;
+  return 'en';
+}
+/** Whole numbers in the player's language (1,370 / 1.370). */
+export function num(n: number): string {
+  return n.toLocaleString(LOCALE[lang]);
+}
+
+/** Dictionary entries with {placeholders}, as patterns for texts built in code. */
+const patterns = new Map<Lang, { re: RegExp; vars: string[]; to: string; weight: number }[]>();
+const memo = new Map<string, string>();
+function fromPattern(d: Record<string, string>, en: string): string | null {
+  let list = patterns.get(lang);
+  if (!list) {
+    list = [];
+    for (const [k, to] of Object.entries(d)) {
+      const vars = [...k.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+      const fixed = k.replace(/\{\w+\}/g, '');
+      if (!vars.length || fixed.trim().length < 2) continue;
+      const re = new RegExp('^' + k.split(/\{\w+\}/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+?)') + '$');
+      list.push({ re, vars, to, weight: fixed.length });
+    }
+    list.sort((a, b) => b.weight - a.weight);
+    patterns.set(lang, list);
+  }
+  for (const p of list) {
+    const m = p.re.exec(en);
+    if (!m) continue;
+    let s = p.to;
+    p.vars.forEach((v, i) => (s = s.replace(`{${v}}`, d[m[i + 1]] ?? m[i + 1])));
+    return s;
+  }
+  return null;
+}
+/** An English text in the current language (itself when there is no translation). */
+function fromEn(en: string): string {
+  const d = DICT[lang];
+  if (!d) return en;
+  const hit = d[en];
+  if (hit !== undefined) return hit;
+  const key = lang + '\u0000' + en;
+  let s = memo.get(key);
+  if (s === undefined) {
+    s = fromPattern(d, en) ?? en;
+    memo.set(key, s);
+  }
+  return s;
 }
 export function t(k: Key, vars?: Record<string, string | number>): string {
-  let s: string = S[k][lang];
+  let s: string = lang === 'es' || lang === 'en' ? S[k][lang] : fromEn(S[k].en);
   if (vars) for (const [a, b] of Object.entries(vars)) s = s.replace(`{${a}}`, String(b));
   return s;
 }
-/** A number in the player's language (thousands separators). */
-export function num(n: number): string {
-  return n.toLocaleString(lang === 'es' ? 'es-ES' : 'en-US');
-}
 export function tx(x: Txt): string {
-  return x[lang];
+  return lang === 'es' || lang === 'en' ? x[lang] : fromEn(x.en);
 }
 export function gameName(): string {
-  return lang === 'es' ? '¡Embócala!' : 'Wild Putt';
+  return t('gameName');
 }
 /** Golf name for a score relative to par. */
 export function scoreName(strokes: number, par: number, maxed = false): string {

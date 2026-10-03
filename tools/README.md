@@ -8,26 +8,28 @@ Los de Python usan Playwright con Chromium (`pip install playwright` y `playwrig
 
 | Script | Qué hace | Uso |
 |---|---|---|
-| `bot.ts` | El bot juega cada hoyo en modo PRO (perfecto) y casual (falla unos 4° y un 15 % de fuerza) y saca la media de golpes contra el par. Referencia en `docs/README.md` | `npm run bot` (o `npx tsx tools/bot.ts [partidas] [hoyo|recorrido|daily]`) |
-| `daily-table.ts` | Regenera `src/sim/dailyTable.ts`, las semillas del reto diario en las que el bot PRO hace par o menos en los 6 hoyos. **Hay que ejecutarlo después de tocar la simulación** | `npm run daily-table` |
+| `route-table.ts` | Elige el diseño de cada hoyo generado y mide su par con el bot (criterios en `docs/dificultad.md`). Escribe `src/sim/routeTable.ts` | `npm run route-table` |
+| `measure.ts` | La medida de un hoyo (8 partidas casual y 2 PRO) y el par que sale de ella. Lo usan `route-table.ts` y `bot.ts` | — |
+| `bot.ts` | El bot juega cada hoyo de la gira en modo PRO y casual (falla unos 4° y un 15 % de fuerza) y saca la media de golpes contra el par; también 3 retos diarios | `npm run bot` (o `npx tsx tools/bot.ts [partidas] [L12 \| recorrido \| daily]`) |
+| `daily-table.ts` | Regenera `src/sim/dailyTable.ts`, las semillas del reto diario en las que el bot PRO hace par o menos en los 6 hoyos. **Hay que ejecutarlo después de tocar la simulación o la ruta** | `npm run daily-table` |
+| `strings.ts` | Lista los textos en inglés que faltan en `src/locales/<idioma>.json` | `npx tsx tools/strings.ts [pt\|fr\|de\|it]` |
 
-## Imágenes (Python + Playwright, con `dist/` servido)
+## Imágenes y vídeos (Python + Playwright, con `dist/` servido)
 
 | Script | Qué genera | Dónde |
 |---|---|---|
 | `assets.py` | Iconos de la web, imagen para redes (`og.png`) y las 3 portadas de CrazyGames, renderizados desde el juego real | `assets/` (`python3 tools/assets.py [all\|icons\|og\|covers]`) |
+| `android_assets.py` | Iconos adaptativos y splash de Android; icono 512, gráfico 1024×500 y 6 capturas para Play | `android/app/src/main/res/` y `assets/play/` (`npm run android:assets`) |
+| `video.py` | Vídeos de vista previa de CrazyGames (1920×1080 y 1080×1620, ~15 s, sin sonido): golpes reales del bot fotograma a fotograma | `build/video/` (`PROFILE=cg169\|cg23 python3 tools/video.py all`) |
 
 ## Música
 
-| Script | Qué genera | Uso |
-|---|---|---|
-| — | La música no se compone por código: se genera con IA en Magnific (Lyria 3 Pro) y se recorta y normaliza con ffmpeg. `assets/music-game.mp3`: lounge-funk con guitarra, contrabajo, Rhodes y vibráfono; `assets/music-menu.mp3`: bossa nova con guitarra de nailon y vibráfono | — |
+La música no se compone por código: se genera con IA en Magnific (Lyria 3 Pro) y se recorta y normaliza con ffmpeg. `assets/music-game.mp3`: lounge-funk con guitarra, contrabajo, Rhodes y vibráfono; `assets/music-menu.mp3`: bossa nova con guitarra de nailon y vibráfono. En Android van en Opus (`dist/android`).
 
-## Pruebas del SDK de CrazyGames (Python + Playwright, con `dist/` servido)
+## Pruebas (Python + Playwright, con `dist/` servido)
 
 | Script | Qué comprueba |
 |---|---|
-| `test_cg_sdk.py` | Con un SDK simulado: la secuencia de llamadas (`init`, `loadingStart/Stop`, `gameplayStart/Stop`, `happytime`), que no haya errores ni enlaces externos |
-| `test_cg_data.py` | El guardado en la nube de CrazyGames: la partida del portal gana al cargar, la partida local se copia la primera vez y el progreso nuevo se guarda |
-
-Los vídeos promocionales y las capturas de tienda de *¡Apágalo!* (`video.py`, `store_shots.py`) se pueden adaptar cuando el juego pase a la fase de tienda.
+| `test_monetize.py` | Con los dobles de anuncios y compras (`?fakeads=1&fakeiap=1`): monedas por hoyo, x2, tienda (línea de tiro, bolas, monedas gratis), mulligan, trofeo de copa, topes del intersticial, reglas del diario, compras y la web sin anuncios ni compras |
+| `test_cg_sdk.py` | Con un SDK de CrazyGames simulado: la secuencia de llamadas (`init`, `loadingStart/Stop`, `gameplayStart/Stop`, `happytime`), sin errores ni enlaces externos. `--ads` para la build con `CG_ADS=1` |
+| `test_cg_data.py` | El guardado en la nube de CrazyGames: la partida del portal gana al cargar, la local se copia la primera vez y el progreso nuevo se guarda |
