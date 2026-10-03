@@ -101,6 +101,7 @@ export class Sim {
   private lipped = false;
   private lastWallT = -1;
   private onSand = false;
+  private field: Float32Array | null = null;
 
   constructor(def: HoleDef, mods: HoleMods = {}) {
     this.def = def;
@@ -583,6 +584,83 @@ export class Sim {
       this.emit('maxed', this.ball.x, this.ball.z);
       this.finish(true);
     }
+  }
+
+  /** Walking distance to the cup from every cell (through green, sand and ice; hazards and walls blocked). */
+  pathField(): Float32Array {
+    if (this.field) return this.field;
+    const N = this.W * this.H;
+    const d = new Float32Array(N).fill(1e9);
+    const done = new Uint8Array(N);
+    const open = (i: number) => {
+      const g = this.ground[i];
+      return g === G.Green || g === G.Sand || g === G.Ice;
+    };
+    d[Math.floor(this.cup.z) * this.W + Math.floor(this.cup.x)] = 0;
+    for (;;) {
+      let u = -1;
+      let bd = 1e9;
+      for (let i = 0; i < N; i++)
+        if (!done[i] && d[i] < bd) {
+          bd = d[i];
+          u = i;
+        }
+      if (u < 0) break;
+      done[u] = 1;
+      const x = u % this.W;
+      const z = (u - x) / this.W;
+      for (let dz = -1; dz <= 1; dz++)
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dz) continue;
+          const nx = x + dx;
+          const nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= this.W || nz >= this.H) continue;
+          const j = nz * this.W + nx;
+          if (!open(j)) continue;
+          if (dx && dz && (!open(z * this.W + nx) || !open(nz * this.W + x))) continue;
+          const c = (dx && dz ? 1.414 : 1) * (this.ground[j] === G.Sand ? 1.8 : 1);
+          if (d[u] + c < d[j]) d[j] = d[u] + c;
+        }
+    }
+    this.field = d;
+    return d;
+  }
+
+  /**
+   * Which way a player would naturally look from (x, z): along the walking path to the cup, a few cells ahead
+   * (so on a dogleg the camera looks down the fairway, not through the wall). Angle in the x/z plane.
+   */
+  guideAngle(x: number, z: number): number {
+    const d = this.pathField();
+    let cx = Math.floor(x);
+    let cz = Math.floor(z);
+    if (d[cz * this.W + cx] >= 1e8) return Math.atan2(this.cup.z - z, this.cup.x - x);
+    for (let k = 0; k < 5; k++) {
+      let best = d[cz * this.W + cx];
+      let bx = cx;
+      let bz = cz;
+      for (let dz = -1; dz <= 1; dz++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = cx + dx;
+          const nz = cz + dz;
+          if (nx < 0 || nz < 0 || nx >= this.W || nz >= this.H) continue;
+          const v = d[nz * this.W + nx];
+          if (v < best) {
+            best = v;
+            bx = nx;
+            bz = nz;
+          }
+        }
+      if (bx === cx && bz === cz) break;
+      cx = bx;
+      cz = bz;
+      // straight line of sight to the cup from here: look at the cup itself
+      if (best === 0) break;
+    }
+    const tx = d[cz * this.W + cx] === 0 ? this.cup.x : cx + 0.5;
+    const tz = d[cz * this.W + cx] === 0 ? this.cup.z : cz + 0.5;
+    if (Math.hypot(tx - x, tz - z) < 0.3) return Math.atan2(this.cup.z - z, this.cup.x - x);
+    return Math.atan2(tz - z, tx - x);
   }
 
   /** Nearest cell centre (from x,z) where a ball can rest safely. */

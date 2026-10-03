@@ -6,6 +6,7 @@ const S = {
   levels: { es: 'Recorridos', en: 'Courses' },
   daily: { es: 'Reto diario', en: 'Daily round' },
   settings: { es: 'Ajustes', en: 'Settings' },
+  camera: { es: 'Cambiar cámara (C)', en: 'Switch camera (C)' },
   tagline: { es: 'Minigolf en sitios donde no debería haber minigolf', en: 'Mini golf where mini golf shouldn’t be' },
   go: { es: '¡A JUGAR!', en: 'TEE OFF!' },
   back: { es: 'Volver', en: 'Back' },
@@ -53,7 +54,7 @@ const S = {
   copied: { es: '¡Copiado! Pégalo donde quieras', en: 'Copied! Paste it anywhere' },
   tutTouch: { es: 'Pon el dedo y tira hacia atrás', en: 'Put your thumb down and pull back' },
   tutTouch2: { es: 'Más lejos = más fuerte · Suelta para golpear', en: 'Further = harder · Let go to putt' },
-  tutDesk: { es: 'Arrastra con el ratón hacia atrás y suelta · O flechas + mantener Espacio', en: 'Drag back with the mouse and let go · Or arrows + hold Space' },
+  tutDesk: { es: 'Arrastra con el ratón hacia atrás y suelta · O flechas + mantener Espacio · C: cámara', en: 'Drag back with the mouse and let go · Or arrows + hold Space · C: camera' },
   // scores
   sHio: { es: '¡HOYO EN UNO!', en: 'HOLE IN ONE!' },
   sAlbatross: { es: '¡ALBATROS!', en: 'ALBATROSS!' },

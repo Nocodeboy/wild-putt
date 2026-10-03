@@ -2,8 +2,9 @@ import { initAnalytics, localeProps, setAnalyticsEnabled, submitDaily, track } f
 import { cloudStore, exitApp, gameplayStart, gameplayStop, happytime, loadingDone, onAndroidBack, platformInit } from './platform';
 import { audio, vibrate } from './audio';
 import { detectLang, fmtPar, gameName, getLang, scoreName, setLang, t, tx } from './i18n';
-import { Input } from './input';
-import { Stage, type Tier } from './render/stage';
+import { Input, screenToWorld, type Shot } from './input';
+import { Stage, type CamMode, type Tier } from './render/stage';
+import type { Aim } from './render/view';
 import { Bot, SKILL_DEMO, SKILL_PRO } from './sim/bot';
 import { ALL_HOLES, COURSES } from './sim/courses';
 import { dayKey, makeDaily, type Daily } from './sim/daily';
@@ -45,7 +46,7 @@ const PRIVACY_URL = typeof __PRIVACY_URL__ !== 'undefined' ? __PRIVACY_URL__ : '
 const GAME_URL = typeof __GAME_URL__ !== 'undefined' ? __GAME_URL__ : '';
 let dailyRank: { players: number; below: number } | null = null;
 
-type Mode = 'attract' | 'intro' | 'play' | 'between' | 'paused' | 'end';
+type Mode = 'attract' | 'intro' | 'play' | 'between' | 'fading' | 'paused' | 'end';
 
 interface Score {
   par: number;
@@ -127,8 +128,10 @@ if (save.firstOpen) {
 }
 track('session_start', { stars: store.totalStars(), ...localeProps() });
 document.title = getLang() === 'es' ? '¡Embócala! · Minigolf' : 'Wild Putt · Mini golf';
-buildHud(pauseGame);
+buildHud(pauseGame, toggleCamera);
 input.onPause = pauseGame;
+input.onCamera = toggleCamera;
+input.vibration = save.settings.vibration;
 onAndroidBack(() => {
   if (mode === 'play') {
     pauseGame();
@@ -147,6 +150,17 @@ const unlock = () => {
   audio.music(mode === 'play' || mode === 'between' ? 'game' : 'menu');
 };
 window.addEventListener('pointerdown', unlock, { once: true });
+// a touch during the hole flyover skips it and starts the pull straight away
+window.addEventListener(
+  'pointerdown',
+  () => {
+    if (mode === 'play' && stage.introRunning) {
+      stage.skipIntro();
+      input.enabled = true;
+    }
+  },
+  { capture: true },
+);
 window.addEventListener('keydown', unlock, { once: true });
 
 startAttract();
@@ -188,6 +202,30 @@ function roundPar(r: Round): number {
 function cupAngle(s: Sim): number {
   return Math.atan2(s.cup.z - s.ball.z, s.cup.x - s.ball.x);
 }
+/** A slingshot pull (screen) or keyboard aim (world) as a world-space putt. */
+function toWorld(a: Shot): Aim {
+  return a.kind === 'world' ? { angle: a.angle, power: a.power } : { angle: screenToWorld(a.dx, a.dy, stage.controlYaw), power: a.power };
+}
+function camMode(): CamMode {
+  return save.settings.cam === 'overview' ? 'overview' : 'chase';
+}
+function toggleCamera() {
+  if (mode !== 'play' || input.dragging) return;
+  save.settings.cam = camMode() === 'chase' ? 'overview' : 'chase';
+  store.save();
+  stage.mode = camMode();
+  audio.play('click');
+  updateCamButton();
+}
+function updateCamButton() {
+  const b = document.getElementById('hud-cam');
+  if (b) b.classList.toggle('on', camMode() === 'overview');
+}
+/** Point the chase camera down the fairway from where the ball rests. */
+function aimCamera() {
+  if (!sim) return;
+  stage.yawTarget = sim.guideAngle(sim.ball.x, sim.ball.z);
+}
 
 // ---------- attract mode (the bot plays behind the menus) ----------
 function startAttract() {
@@ -196,6 +234,7 @@ function startAttract() {
   sim = new Sim(h.hole);
   bot = new Bot(sim, SKILL_DEMO, attractIdx);
   stage.setLevel(sim, h.course.id);
+  stage.mode = 'overview';
   stage.zoom = stage.zoomTarget = 1.08;
   mode = 'attract';
   round = null;
@@ -279,7 +318,10 @@ function showSettings() {
       } else if (k === 'music') {
         st.music = v as boolean;
         audio.setMusic(st.music);
-      } else if (k === 'vibration') st.vibration = v as boolean;
+      } else if (k === 'vibration') {
+        st.vibration = v as boolean;
+        input.vibration = st.vibration;
+      }
       else if (k === 'stats') {
         st.stats = v as boolean;
         setAnalyticsEnabled(st.stats);
@@ -290,7 +332,7 @@ function showSettings() {
       } else if (k === 'lang') {
         st.lang = v as 'es' | 'en';
         setLang(st.lang);
-        buildHud(pauseGame);
+        buildHud(pauseGame, toggleCamera);
         store.save();
         showSettings();
         return;
@@ -321,7 +363,8 @@ function loadHole(r: Round) {
   flags.lastStroke = false;
   clearFloaters();
   input.reset();
-  input.resetKeyboardAim(cupAngle(sim));
+  input.resetAim();
+  stage.mode = camMode();
 }
 
 function newRound(kind: Round['kind'], index: number, holes: Round['holes'], mods: HoleMods, daily?: Daily): Round {
@@ -396,7 +439,10 @@ function startPlay() {
   gameplayStart();
   input.enabled = true;
   input.reset();
-  input.resetKeyboardAim(cupAngle(sim));
+  input.resetAim();
+  stage.mode = camMode();
+  stage.intro();
+  updateCamButton();
   acc = 0;
   holeStart = performance.now();
   const id = round.kind === 'daily' ? `daily-${round.daily!.num}` : COURSES[round.index].id;
@@ -416,11 +462,17 @@ function startPlay() {
   }
 }
 
+/** Big card while the camera flies in: hole number, name and par. */
 function showHoleName() {
   if (!round) return;
   const h = round.holes[round.cur];
-  toast(`${t('hole')} ${round.cur + 1} · ${tx(h.hole.name)} · ${t('par')} ${h.hole.par}`, '', 2000);
+  document.querySelector('.holecard')?.remove();
+  const n = el(`<div class="holecard"><small>${t('hole')} ${round.cur + 1}/${round.holes.length}</small><b>${esc(tx(h.hole.name))}</b><span>${t('par')} ${h.hole.par}</span></div>`);
+  $('#app').appendChild(n);
+  setTimeout(() => n.classList.add('out'), 1700);
+  setTimeout(() => n.remove(), 2200);
 }
+const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 function pauseGame() {
   if (mode !== 'play' || !round) return;
@@ -549,16 +601,17 @@ function handleEvent(ev: SimEvent) {
       const great = ev.n === 1 ? 3 : d <= -1 ? 2 : d === 0 ? 1 : 0;
       setTimeout(() => audio.play('cheer', great), 250);
       if (vib) vibrate(great >= 2 ? [20, 40, 20, 40, 60] : 20);
-      if (ev.n === 1) {
-        save.aces = (save.aces ?? 0) + 1;
-        if (!stage.reducedMotion) stage.zoomTarget = 0.85;
-      }
+      if (ev.n === 1) save.aces = (save.aces ?? 0) + 1;
+      // the camera drops in on the cup
+      stage.focus = { x: s.cup.x, z: s.cup.z };
+      if (!stage.reducedMotion) stage.zoomTarget = ev.n === 1 ? 0.6 : 0.75;
       break;
     }
     case 'maxed':
       audio.play('groan');
       break;
     case 'rest':
+      aimCamera();
       if (s.strokes === s.maxStrokes - 1 && !flags.lastStroke) {
         flags.lastStroke = true;
         toast(t('tLastStroke'), 'warn', 1800);
@@ -587,14 +640,23 @@ function holeDone() {
 function nextHole() {
   const r = round!;
   if (r.cur + 1 < r.holes.length) {
-    r.cur++;
-    loadHole(r);
-    mode = 'play';
-    input.enabled = true;
-    stage.zoomTarget = 1;
-    holeStart = performance.now();
-    track('level_start', { level: r.holes[r.cur].hole.id });
-    showHoleName();
+    // quick fade to the next hole, then the camera flies in
+    const fade = $('#fade');
+    fade.classList.add('on');
+    setTimeout(() => {
+      r.cur++;
+      loadHole(r);
+      mode = 'play';
+      input.enabled = true;
+      stage.focus = null;
+      stage.zoom = stage.zoomTarget = 1;
+      stage.intro();
+      holeStart = performance.now();
+      track('level_start', { level: r.holes[r.cur].hole.id });
+      showHoleName();
+      fade.classList.remove('on');
+    }, 260);
+    mode = 'fading' as Mode;
   } else finishRound();
 }
 
@@ -782,15 +844,21 @@ function tick(dt: number) {
   if (!s) return;
   let steps = 0;
   if (mode === 'play' || mode === 'between') {
+    // the player can putt once the camera has flown in
+    input.enabled = mode === 'play' && !stage.introRunning;
+    stage.lockYaw = input.dragging;
     if (mode === 'play' && s.state === 'aim') {
-      input.poll(dt, cupAngle(s));
+      const kb = input.poll(dt, stage.yaw);
+      // keyboard aiming turns the chase camera with the aim
+      if (kb && input.aim?.kind === 'world') stage.yawTarget = input.aim.angle;
       const driver = rec.driver;
       if (driver) driver.update();
       else {
         const shot = input.takeShot();
         if (shot) {
-          s.shoot(shot.angle, shot.power);
-          input.resetKeyboardAim(cupAngle(s));
+          const w = toWorld(shot);
+          s.shoot(w.angle, w.power);
+          input.resetAim();
         }
       }
     }
@@ -804,7 +872,6 @@ function tick(dt: number) {
     }
     if (acc > SIM_DT * 3) acc = 0;
     if (mode === 'play' && s.state === 'done') holeDone();
-    else if (mode === 'play' && s.state === 'aim' && rec.driver === null && input.aim === null) input.resetKeyboardAim(cupAngle(s));
   } else if (mode === 'attract' && bot) {
     bot.update(30);
     acc += dt;
@@ -829,12 +896,12 @@ function tick(dt: number) {
       steps++;
     }
   }
-  if (stage.view) stage.view.aim = mode === 'play' && s.state === 'aim' ? input.aim : null;
+  if (stage.view) stage.view.aim = mode === 'play' && s.state === 'aim' && input.aim ? toWorld(input.aim) : null;
   const paused = mode === 'paused';
   time += paused ? 0 : dt;
   if (rec.render) stage.frame(paused ? 0 : dt, time);
 
-  if (mode === 'play' || mode === 'between') {
+  if (mode === 'play' || mode === 'between' || mode === 'fading') {
     const r = round!;
     audio.loops(stage.theme.surround, dt);
     updateHud({

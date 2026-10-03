@@ -12,6 +12,8 @@ export interface Settings {
   lang: Lang | null;
   /** anonymous gameplay statistics (opt-out) */
   stats?: boolean;
+  /** camera: behind the ball (default) or the whole hole from above */
+  cam?: 'chase' | 'overview';
 }
 export interface DailyRecord {
   /** total strokes (lower is better) */

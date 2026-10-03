@@ -1,29 +1,31 @@
 // One-thumb slingshot.
-//   Touch / mouse: put your thumb down anywhere and pull back. The putt goes the opposite way; the further you pull,
-//   the harder. Let go to putt. Drag back to where you started (or press Esc / right click) to cancel.
-//   Keyboard: left/right arrows (A/D) turn the aim, hold Space to set the power (it swings up and down), let go to putt.
+//   Touch / mouse: put your thumb down anywhere and pull back. The putt goes the opposite way (relative to the
+//   camera); the further you pull, the harder. The pad shows the power; pulling back to the middle shows ✕ and
+//   letting go there cancels. A right click or Esc also cancels.
+//   Keyboard: left/right (A/D) turn the aim, hold Space (or W/↑) to swing the power up and down, let go to putt.
 
-const CANCEL_PX = 18;
+import { vibrate } from './audio';
 
-export interface Shot {
-  angle: number;
-  power: number;
-}
+const DEAD_PX = 22; // inside this the pull is "cancel"
+
+/** A putt in screen terms (dx, dy: unit direction of travel on screen) or already in world terms. */
+export type Shot = { kind: 'screen'; dx: number; dy: number; power: number } | { kind: 'world'; angle: number; power: number };
 
 export class Input {
   mode: 'touch' | 'mouse' = 'ontouchstart' in window ? 'touch' : 'mouse';
   enabled = false;
+  vibration = true;
   onPause: () => void = () => undefined;
-  /** Live aim while pulling (or charging with the keyboard); null when idle. */
+  onCamera: () => void = () => undefined;
+  /** Live aim while pulling or charging; null when idle. */
   aim: Shot | null = null;
-  /** Set once when the player lets go; main.ts takes it. */
   private shot: Shot | null = null;
   private p: { id: number; ox: number; oy: number; x: number; y: number } | null = null;
   private keys = new Set<string>();
   private kbAngle = -Math.PI / 2;
   private kbT = 0;
   private kbCharging = false;
-  /** world-space putt angle = screen drag angle + this (the camera looks straight up the screen) */
+  private lastStep = 0;
   usedAim = false;
   usedShot = false;
   /** px of pull for a full-power putt (set from the screen size) */
@@ -33,6 +35,7 @@ export class Input {
     private layer: HTMLElement,
     private pad: HTMLElement,
   ) {
+    pad.innerHTML = '<i></i><b class="pw"><s></s></b><em class="pct"></em>';
     layer.addEventListener('pointerdown', (e) => this.down(e));
     window.addEventListener('pointermove', (e) => this.move(e), { passive: false });
     window.addEventListener('pointerup', (e) => this.up(e));
@@ -50,8 +53,9 @@ export class Input {
         else this.onPause();
       }
       if (k === 'p') this.onPause();
+      if (k === 'c' && !e.repeat) this.onCamera();
       if (k === ' ' || k.startsWith('arrow')) e.preventDefault();
-      if (k === ' ' && !e.repeat && !this.p) {
+      if ((k === ' ' || k === 'w' || k === 'arrowup') && !e.repeat && !this.p) {
         this.kbCharging = true;
         this.kbT = 0;
       }
@@ -59,7 +63,7 @@ export class Input {
     window.addEventListener('keyup', (e) => {
       const k = e.key.toLowerCase();
       this.keys.delete(k);
-      if (k === ' ' && this.kbCharging && this.enabled) {
+      if ((k === ' ' || k === 'w' || k === 'arrowup') && this.kbCharging && this.enabled) {
         this.kbCharging = false;
         if (this.aim && this.aim.power > 0.03) {
           this.shot = { ...this.aim };
@@ -72,9 +76,14 @@ export class Input {
       this.keys.clear();
       this.cancel();
     });
-    const fit = () => (this.fullPx = Math.max(120, Math.min(260, Math.min(window.innerWidth, window.innerHeight) * 0.36)));
+    const fit = () => (this.fullPx = Math.max(120, Math.min(240, Math.min(window.innerWidth, window.innerHeight) * 0.34)));
     fit();
     window.addEventListener('resize', fit);
+  }
+
+  /** True while a thumb is pulling (the camera must not turn). */
+  get dragging(): boolean {
+    return !!this.p;
   }
 
   reset() {
@@ -97,6 +106,7 @@ export class Input {
     this.mode = e.pointerType === 'mouse' ? 'mouse' : 'touch';
     if (e.cancelable) e.preventDefault();
     this.p = { id: e.pointerId, ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY };
+    this.lastStep = 0;
     this.update();
     this.render();
   }
@@ -128,13 +138,21 @@ export class Input {
     const dx = p.x - p.ox;
     const dy = p.y - p.oy;
     const d = Math.hypot(dx, dy);
-    if (d < CANCEL_PX) {
-      this.aim = { angle: this.aim?.angle ?? -Math.PI / 2, power: 0 };
+    if (d < DEAD_PX) {
+      this.aim = this.aim && this.aim.kind === 'screen' ? { ...this.aim, power: 0 } : { kind: 'screen', dx: 0, dy: -1, power: 0 };
       return;
     }
     this.usedAim = true;
-    // pulling down-screen putts up-screen: screen x → world x, screen y → world z
-    this.aim = { angle: Math.atan2(-dy, -dx), power: Math.min(1, (d - CANCEL_PX) / this.fullPx) };
+    // a gentle curve: fine control at low power, full power still reachable
+    const u = Math.min(1, (d - DEAD_PX) / this.fullPx);
+    const power = Math.max(0.03, Math.pow(u, 1.15));
+    this.aim = { kind: 'screen', dx: -dx / d, dy: -dy / d, power };
+    // a tick every 25 % of power (phones that support it)
+    const step = Math.floor(power * 4.0001);
+    if (step !== this.lastStep) {
+      if (this.vibration && step > this.lastStep) vibrate(step >= 4 ? 18 : 6);
+      this.lastStep = step;
+    }
   }
 
   private render() {
@@ -143,19 +161,25 @@ export class Input {
       this.pad.classList.remove('on');
       return;
     }
+    const a = this.aim;
+    const cancel = !a || a.power <= 0;
     this.pad.classList.add('on');
-    this.pad.classList.toggle('cancel', !this.aim || this.aim.power <= 0);
+    this.pad.classList.toggle('cancel', cancel);
     this.pad.style.transform = `translate(${p.ox}px, ${p.oy}px)`;
     const knob = this.pad.firstElementChild as HTMLElement;
     let dx = p.x - p.ox;
     let dy = p.y - p.oy;
     const d = Math.hypot(dx, dy);
-    const max = this.fullPx * 0.45;
+    const max = 46;
     if (d > max) {
       dx = (dx / d) * max;
       dy = (dy / d) * max;
     }
     knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const pw = Math.round((a?.power ?? 0) * 100);
+    (this.pad.querySelector('.pw s') as HTMLElement).style.height = `${pw}%`;
+    this.pad.style.setProperty('--pw', String(a?.power ?? 0));
+    (this.pad.querySelector('.pct') as HTMLElement).textContent = cancel ? '✕' : `${pw}%`;
   }
 
   /** The putt the player just released, once. */
@@ -165,32 +189,42 @@ export class Input {
     return s;
   }
 
-  /** Keyboard aiming; call every frame with dt. `defaultAngle` points at the cup when nothing is aimed yet. */
-  poll(dt: number, defaultAngle: number) {
-    if (this.p || !this.enabled) return;
+  /** Keyboard aiming; call every frame. Returns true while the keyboard is driving the aim. */
+  poll(dt: number, defaultAngle: number): boolean {
+    if (this.p || !this.enabled) return false;
     const k = this.keys;
     let turn = 0;
     if (k.has('arrowleft') || k.has('a')) turn -= 1;
     if (k.has('arrowright') || k.has('d')) turn += 1;
-    if (turn && !this.aim) this.kbAngle = this.aim ? this.kbAngle : this.kbAngle;
-    if (turn || this.kbCharging) {
-      if (!this.aim) this.kbAngle = this.usedAim ? this.kbAngle : defaultAngle;
-      this.usedAim = true;
-      this.kbAngle += turn * dt * (k.has('shift') ? 0.35 : 1.4);
-      let power = this.aim?.power ?? 0;
-      if (this.kbCharging) {
-        // the power swings 0 → 1 → 0 every 2 s while Space is held
-        this.kbT += dt;
-        const u = (this.kbT / 1.0) % 2;
-        power = u < 1 ? u : 2 - u;
-      }
-      this.aim = { angle: this.kbAngle, power };
+    if (!turn && !this.kbCharging) return this.aim?.kind === 'world';
+    if (!this.aim || this.aim.kind !== 'world') this.kbAngle = defaultAngle;
+    this.usedAim = true;
+    this.kbAngle += turn * dt * (k.has('shift') ? 0.3 : 1.2);
+    let power = this.aim?.power ?? 0;
+    if (this.kbCharging) {
+      // the power swings 0 → 1 → 0 every 2 s while the key is held
+      this.kbT += dt;
+      const u = this.kbT % 2;
+      power = u < 1 ? u : 2 - u;
     }
+    this.aim = { kind: 'world', angle: this.kbAngle, power };
+    return true;
   }
-  /** Point the keyboard aim at the cup for a new stroke. */
-  resetKeyboardAim(angle: number) {
-    this.kbAngle = angle;
+  /** Forget the keyboard aim (new stroke). */
+  resetAim() {
     if (!this.p && !this.kbCharging) this.aim = null;
     this.usedAim = false;
   }
+}
+
+/** Screen-space direction → world angle, given the camera yaw (direction the camera looks along the ground). */
+export function screenToWorld(dx: number, dy: number, yaw: number): number {
+  // screen up = forward f = (cos yaw, sin yaw); screen right = r = (−sin yaw, cos yaw)
+  const fx = Math.cos(yaw);
+  const fz = Math.sin(yaw);
+  const rx = -fz;
+  const rz = fx;
+  const wx = rx * dx + fx * -dy;
+  const wz = rz * dx + fz * -dy;
+  return Math.atan2(wz, wx);
 }

@@ -22,6 +22,7 @@ export const IC = {
   bolt: s('<path d="M13 2 5 13.5h6L10 22l9-12.5h-6z" fill="currentColor" stroke="none"/>'),
   ball: c('<circle cx="12" cy="12" r="8" fill="#fff" stroke="#c8ccd0" stroke-width="1"/><circle cx="9.5" cy="9" r=".9" fill="#c8ccd0"/><circle cx="13" cy="8.5" r=".9" fill="#c8ccd0"/><circle cx="10.5" cy="12.5" r=".9" fill="#c8ccd0"/><circle cx="14.5" cy="12" r=".9" fill="#c8ccd0"/><circle cx="12.5" cy="15.5" r=".9" fill="#c8ccd0"/>'),
   hole: c('<ellipse cx="12" cy="19" rx="7" ry="2.4" fill="#141414"/><rect x="11" y="3" width="1.8" height="16" rx=".9" fill="#f4f4f0"/><path d="M12.8 3.5h7.5l-2.2 3 2.2 3h-7.5z" fill="#e8483a"/>'),
+  cam: s('<path d="M3 8h3l2-3h8l2 3h3v11H3z"/><circle cx="12" cy="13" r="3.6"/>'),
   putter: s('<path d="M15 3 9.5 18"/><path d="M6.5 18.5h6.5a1.5 1.5 0 0 1 0 3H6.5z" fill="currentColor"/>'),
   flag: c('<rect x="5" y="3" width="2" height="18" rx="1" fill="#f1ead8"/><path d="M7 4h11l-3 4 3 4H7z" fill="#e8483a"/>'),
   pen: s('<path d="M3 20V9M21 20V9M3 11h18M3 16h18M8 9v11M16 9v11"/>'),

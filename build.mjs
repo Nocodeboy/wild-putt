@@ -9,7 +9,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { execSync } from 'node:child_process';
 
 const prod = !process.argv.includes('--dev');
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const GAME_URL = process.env.GAME_URL ?? 'https://wild-putt.vercel.app';
 // Supabase project shared by the studio's games (nocodeboy-games); the publishable key is public by design.
 const ANALYTICS = { url: 'https://xshxfaospajlgwrnivvq.supabase.co', key: 'sb_publishable_GfwGUNaIh924_4oNIIqoZw_ellp8wGm' };
@@ -48,6 +48,7 @@ const body = `<div id="app">
 <div id="floaters"></div>
 <div id="vignette"></div>
 <div id="flash"></div>
+<div id="fade"></div>
 <div id="hud" hidden></div>
 <div class="stick" id="pad"><i></i></div>
 <div id="toast" aria-live="polite"></div>

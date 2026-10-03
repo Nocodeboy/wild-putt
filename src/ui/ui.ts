@@ -477,7 +477,7 @@ export function updateIcons(stage: Stage, labels: Label[], edges: EdgeMark[]) {
 }
 
 // ---------------- HUD ----------------
-export function buildHud(onPause: () => void) {
+export function buildHud(onPause: () => void, onCamera: () => void = () => undefined) {
   const hud = $('#hud');
   hud.innerHTML = `
     <div class="hud-row">
@@ -485,11 +485,15 @@ export function buildHud(onPause: () => void) {
       <div class="chip holechip" id="hud-hole"><span class="hn"></span><span class="hname"></span></div>
       <div class="chip parchip" id="hud-par"></div>
     </div>
+    <div class="hud-row hud-right">
+      <button class="icon-btn" id="hud-cam" aria-label="${t('camera')}" title="${t('camera')}">${IC.cam}</button>
+    </div>
     <div class="hud-row">
       <div class="chip strokechip" id="hud-strokes">${IC.putter}<span></span></div>
       <div class="chip totchip" id="hud-total"></div>
     </div>`;
   $('#hud-pause').addEventListener('click', onPause);
+  $('#hud-cam').addEventListener('click', onCamera);
 }
 
 export interface HudState {

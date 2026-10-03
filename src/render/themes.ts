@@ -18,6 +18,7 @@ export interface Theme {
   outside: number; // ground colour around the hole
   outsideY: number; // how far below the green it is (rooftops: the street is far down)
   green: [string, string]; // mowing stripes
+  rough: [string, string]; // the ground around the rails (inside the hole's plate, where the ball never goes)
   sand: string;
   ice: string;
   water: string;
@@ -45,6 +46,7 @@ const DAY: Theme = {
   outside: 0x78ad4a,
   outsideY: -0.55,
   green: ['#5cbf55', '#52b24c'],
+  rough: ['#3f8f3c', '#367f34'],
   sand: '#ead9a4',
   ice: '#cfeefa',
   water: '#3ea6d9',
@@ -74,6 +76,7 @@ export const THEMES: Record<ThemeId, Theme> = {
     outside: 0x5d5a66,
     outsideY: -9,
     green: ['#5aa86a', '#4f9a60'],
+    rough: ['#b8583a', '#9a4a30'],
     wall: 0xb85a3c,
     wallTop: 0x7a3a26,
     base: [0x9a5a3c, 0x7a4430],
@@ -92,6 +95,7 @@ export const THEMES: Record<ThemeId, Theme> = {
     outside: 0x14598a,
     outsideY: -1.2,
     green: ['#c8955a', '#bb894f'], // a felt-free deck: the "green" is the planking
+    rough: ['#7a4f2a', '#6a4424'],
     wall: 0x8a5a30,
     wallTop: 0x4a2a14,
     base: [0x6a3e1e, 0x4a2a14],
@@ -114,6 +118,7 @@ export const THEMES: Record<ThemeId, Theme> = {
     outside: 0x3a3048,
     outsideY: -0.55,
     green: ['#3fae6a', '#36a060'],
+    rough: ['#e8e2d8', '#d84a3c'],
     wall: 0xf2f0ea,
     wallTop: 0xe8483a,
     base: [0x4a3a5a, 0x382c46],
@@ -134,6 +139,7 @@ export const THEMES: Record<ThemeId, Theme> = {
     outside: 0xe8f4fa,
     outsideY: -0.7,
     green: ['#6cc49a', '#62b88e'],
+    rough: ['#f4f9fc', '#dceef8'],
     wall: 0xe8f6fc,
     wallTop: 0x8ac4e0,
     base: [0x8ac4e0, 0x6aa8cc],
@@ -156,6 +162,7 @@ export const THEMES: Record<ThemeId, Theme> = {
     outside: 0x2c2422,
     outsideY: -0.8,
     green: ['#6a7d4a', '#5f7243'],
+    rough: ['#3a3236', '#2e282c'],
     sand: '#8a7a6a',
     wall: 0x5a5054,
     wallTop: 0xff6a1a,

@@ -6,7 +6,15 @@
 
 Lo técnico (estructura, comandos, controles, cómo se hace un hoyo) está en el [README principal](../README.md).
 
-## Estado (3 oct 2026) · Fase 2: prototipo 0.1.0
+## Estado (3 oct 2026) · Fase 2: prototipo 0.2.0
+
+### 0.2.0: gráficos, cámara, animaciones y control
+- **Cámara de seguimiento** detrás de la bola, mirando hacia donde va el camino (no en línea recta al hoyo, porque usa el campo de distancias andando). Al empezar cada hoyo hay un vuelo de presentación desde la bandera hasta la bola; tocar la pantalla lo salta. Al embocar se acerca al hoyo. **Vista general** con el botón de cámara o la tecla C; se guarda en ajustes.
+- **Control:** el tirachinas funciona respecto a la cámara (tirar hacia abajo = golpe hacia delante en pantalla). Tiene una barra de fuerza con porcentaje, una zona muerta que muestra ✕ y cancela si sueltas ahí, curva de fuerza más fina en golpes suaves y vibración cada 25 %. La cámara no gira mientras arrastras. Con teclado: flechas para apuntar y Espacio para cargar la fuerza.
+- **Gráficos:** barandillas finas con postes y remates redondos (antes eran muros gruesos), hoyo real hundido con borde, agua hundida y animada, mar y lava con textura en movimiento, cielo con degradado, tone mapping neutro, sombras suaves, suelo pintado por recorrido (rayas de césped, tablones del barco, arena rastrillada, grietas del hielo, flechas en las pendientes) y oclusión junto a las barandillas.
+- **Animaciones:** putter que se coloca detrás de la bola, retrocede según la fuerza y golpea; bola que se aplasta al chocar y cae al hoyo; bandera que ondea, sube y gira al embocar; puntos de la línea de tiro que avanzan; anillo de fuerza de verde a rojo; cartel con el nombre del hoyo y fundido entre hoyos.
+
+### Base (0.1.0)
 
 Hecho:
 - **Física de la bola** (`src/sim/world.ts`): fricción según el suelo (green, arena, hielo), pendientes, rebotes en paredes con esquinas, setas que impulsan, aspas que giran y empujan, bloques que se deslizan, captura en el hoyo con «lip out» si llega rápida y +1 por agua, vacío o lava.
@@ -22,7 +30,7 @@ Hecho:
 
 ### Dificultad medida con el bot casual (6 partidas por hoyo, 3 oct 2026)
 
-El bot casual falla unos 4° y un 15 % de fuerza. Una persona que juega por primera vez lo hará peor, así que una media algo por debajo del par es lo que buscamos.
+La 0.2.0 no toca la física: el bot da los mismos resultados. El bot casual falla unos 4° y un 15 % de fuerza. Una persona que juega por primera vez lo hará peor, así que una media algo por debajo del par es lo que buscamos.
 
 | Recorrido | Hoyo 1 | Hoyo 2 | Hoyo 3 |
 |---|---|---|---|
@@ -34,8 +42,8 @@ El bot casual falla unos 4° y un 15 % de fuerza. Una persona que juega por prim
 | Volcán | 1,33 (par 2) | 3,33 (par 3) | 2,83 (par 3) |
 
 Pendiente, en este orden:
-1. **Jugarlo 5 minutos** (Germán) y decidir si se siente «otro minigolf más» o tiene chispa. Ojo con la fuerza del tirachinas, la línea de puntos y la sensación del barco.
+1. **Jugarlo 5 minutos** (Germán) y decidir si se siente «otro minigolf más» o tiene chispa. Ojo con la cámara de seguimiento frente a la vista general, la fuerza del tirachinas y la sensación del barco.
 2. Repo privado `Nocodeboy/wild-putt`, catálogo del estudio y fila en la tabla `games` del Supabase.
 3. Web en Vercel (`wild-putt.vercel.app`, ya puesta en la build).
-4. Más hoyos por recorrido (el objetivo es 9) si el test lo justifica; portadas definitivas.
+4. Más hoyos por recorrido (el objetivo es 9) si el test lo justifica; portadas, icono y `og.png` regenerados con el aspecto de la 0.2.0.
 5. Prueba con 5 personas y CrazyGames Basic Launch con los criterios de `concepto.md`.
