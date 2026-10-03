@@ -1,7 +1,9 @@
 export type Lang = 'es' | 'en';
 export type Txt = { es: string; en: string };
 
-export type ThemeId = 'garden' | 'roofs' | 'ship' | 'fair' | 'glacier' | 'volcano';
+/** The 12 courses of the world tour, in the order they open (docs/diseno-v2.md §5.1). */
+export const THEME_IDS = ['garden', 'roofs', 'ship', 'fair', 'glacier', 'volcano', 'beach', 'temple', 'castle', 'neon', 'canyon', 'moon'] as const;
+export type ThemeId = (typeof THEME_IDS)[number];
 
 /** A rotating beam (windmill paddle) around a centre cell. */
 export interface SpinnerDef {
@@ -34,6 +36,18 @@ export interface HoleDef {
   sway?: { amp: number; period: number };
   /** volcano: the lava spreads this many cells after every stroke */
   lavaRise?: number;
+  /** beach: wet sand ('w') goes under water for part of every cycle */
+  tide?: { period: number; phase: number; up: number };
+  /** castle: portcullis cells ('G', and 'H' half a cycle later) are walls while down */
+  gates?: { period: number; phase: number };
+  /** castle: drawbridge cells ('=') are water while the bridge is up */
+  bridge?: { period: number; phase: number };
+  /** moon: × rolling friction for the whole hole */
+  gravity?: number;
+  /** coins lying on the green (cell centres) */
+  coins?: [number, number][];
+  /** the course it belongs to (generated holes) */
+  course?: ThemeId;
 }
 
 export interface CourseDef {
@@ -41,6 +55,11 @@ export interface CourseDef {
   num: number;
   name: Txt;
   tip: Txt;
+  /** the trophy of its cup hole */
+  cup: Txt;
+  /** its colour on the tour (route nodes, stamps, trophy) */
+  color: string;
+  /** hand-made holes: the first is the course's presentation, the others come on its next visits */
   holes: HoleDef[];
 }
 

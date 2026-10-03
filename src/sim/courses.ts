@@ -9,6 +9,8 @@ const h = (d: HoleDef) => d;
 export const COURSES: CourseDef[] = [
   {
     id: 'garden',
+    color: '#3cc46e',
+    cup: { en: 'Garden Cup', es: 'Copa del Jardín' },
     num: 1,
     name: { es: 'El jardín', en: 'The Garden' },
     tip: { es: 'Tira hacia atrás para apuntar y suelta. Usa las paredes para rebotar.', en: 'Pull back to aim and let go. Bank off the walls.' },
@@ -17,7 +19,8 @@ export const COURSES: CourseDef[] = [
         id: 'g1',
         name: { es: 'Primer golpe', en: 'First Putt' },
         par: 2,
-        map: ['#######', '#..O..#', '#.....#', '#.....#', '#.....#', '#.....#', '#.....#', '#.....#', '#.....#', '#..T..#', '#######'],
+        // (a gentle bowl round the cup: a first putt that is roughly right drops)
+        map: ['#######', '#.>v<.#', '#.>O<.#', '#.>^<.#', '#.....#', '#.....#', '#.....#', '#.....#', '#..T..#', '#######'],
       }),
       h({
         id: 'g2',
@@ -60,6 +63,8 @@ export const COURSES: CourseDef[] = [
   },
   {
     id: 'roofs',
+    color: '#e2703f',
+    cup: { en: 'Chimney Cup', es: 'Copa de la Chimenea' },
     num: 2,
     name: { es: 'Los tejados', en: 'The Rooftops' },
     tip: { es: 'Donde no hay pretil, la bola se cae a la calle (+1). Las flechas empujan la bola.', en: 'No railing means the ball drops to the street (+1). Arrows push the ball.' },
@@ -100,6 +105,8 @@ export const COURSES: CourseDef[] = [
   },
   {
     id: 'ship',
+    color: '#3a8fd6',
+    cup: { en: 'Anchor Cup', es: 'Copa del Ancla' },
     num: 3,
     name: { es: 'El barco pirata', en: 'The Pirate Ship' },
     tip: { es: 'La cubierta se balancea: la bola se va hacia el lado que baja. Sin borda, al agua (+1).', en: 'The deck sways: the ball rolls to the low side. No rail means splash (+1).' },
@@ -129,6 +136,8 @@ export const COURSES: CourseDef[] = [
   },
   {
     id: 'fair',
+    color: '#b45cf0',
+    cup: { en: 'Carousel Cup', es: 'Copa del Carrusel' },
     num: 4,
     name: { es: 'La feria', en: 'The Funfair' },
     tip: { es: 'Las aspas giran sin parar: espera tu momento. Las setas rojas rebotan fuerte.', en: 'The paddles never stop turning: time your putt. Red mushrooms bounce hard.' },
@@ -160,6 +169,8 @@ export const COURSES: CourseDef[] = [
   },
   {
     id: 'glacier',
+    color: '#6fd0f5',
+    cup: { en: 'Snowflake Cup', es: 'Copa del Copo de Nieve' },
     num: 5,
     name: { es: 'El glaciar', en: 'The Glacier' },
     tip: { es: 'En el hielo la bola casi no frena: golpea suave. Cuidado con los bloques que se deslizan.', en: 'Ice barely slows the ball: putt soft. Watch the sliding blocks.' },
@@ -190,6 +201,8 @@ export const COURSES: CourseDef[] = [
   },
   {
     id: 'volcano',
+    color: '#ff6a1a',
+    cup: { en: 'Magma Cup', es: 'Copa del Magma' },
     num: 6,
     name: { es: 'El volcán', en: 'The Volcano' },
     tip: { es: 'La lava avanza con cada golpe. Si te alcanza, +1. ¡Métela antes!', en: 'The lava creeps forward after every putt. If it reaches you, +1. Sink it first!' },

@@ -184,7 +184,7 @@ export class Sim {
       const mx = (x: number) => (mods.mirror ? this.W - x : x);
       this.movers.push({ x0: mx(m.x0), z0: m.z0, x1: mx(m.x1), z1: m.z1, hw: m.w / 2, hh: m.h / 2, period: m.period, phase: m.phase ?? 0 });
     }
-    this.maxStrokes = def.par + 4;
+    this.maxStrokes = def.par + 3;
     this.ball = { x: tee.x, z: tee.z, vx: 0, vz: 0, y: 0, state: 'rest' };
     this.lastRest = { ...tee };
     if (hasLava && def.lavaRise) {

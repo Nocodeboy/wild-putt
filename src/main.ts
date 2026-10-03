@@ -6,10 +6,10 @@ import { Input, screenToWorld, type Shot } from './input';
 import { Stage, type CamMode, type Tier } from './render/stage';
 import type { Aim } from './render/view';
 import { Bot, SKILL_DEMO, SKILL_PRO } from './sim/bot';
-import { ALL_HOLES, COURSES } from './sim/courses';
 import { dayKey, makeDaily, type Daily } from './sim/daily';
 import { DAILY_SALTS } from './sim/dailyTable';
-import type { CourseDef, HoleDef, HoleMods, SimEvent } from './sim/types';
+import { champLevel, courseById, holeDef, READY, ROUTE, ROUTE_LEN, FULL_LEN } from './sim/route';
+import type { HoleDef, HoleMods, SimEvent, ThemeId } from './sim/types';
 import { Sim, SIM_DT } from './sim/world';
 import * as store from './storage';
 import type { Settings } from './storage';
@@ -20,20 +20,22 @@ import {
   cardHtml,
   clearFloaters,
   clearScreens,
-  coursePar,
   el,
   endScreen,
+  esc,
   floater,
-  goalsHtml,
+  holeEndScreen,
+  holeIntroScreen,
   introScreen,
-  levelsScreen,
   pauseScreen,
   resetHudCache,
+  routeScreen,
   settingsScreen,
   titleScreen,
   toast,
   updateFloaters,
   updateHud,
+  holeGoalsHtml,
 } from './ui/ui';
 
 declare const __MUSIC__: { menu?: string; game?: string };
@@ -53,16 +55,8 @@ interface Score {
   strokes?: number;
   maxed?: boolean;
 }
-interface Round {
-  kind: 'course' | 'daily';
-  index: number; // course index (course rounds)
-  daily?: Daily;
-  holes: { course: CourseDef; hole: HoleDef }[];
-  mods: HoleMods;
-  cur: number;
-  scores: Score[];
-  t0: number;
-}
+/** What is being played: one hole of the tour, or the daily round of six. */
+type Current = { kind: 'level'; n: number } | { kind: 'daily'; daily: Daily; cur: number; scores: Score[]; t0: number };
 
 const canvas = $<HTMLCanvasElement>('#c');
 const stage = new Stage(canvas);
@@ -71,14 +65,16 @@ let save = store.load();
 let mode: Mode = 'attract';
 let sim: Sim | null = null;
 let bot: Bot | null = null;
-let round: Round | null = null;
+let current: Current | null = null;
 let acc = 0;
 let time = 0;
 let last = performance.now();
 let betweenT = 0;
-let attractIdx = Math.floor(Math.random() * ALL_HOLES.length);
+let attractIdx = Math.floor(Math.random() * 1000);
 let tutorialNodes: HTMLElement[] = [];
 let tutT = 0;
+/** first hole of a new player: a ring round the ball and an arrow that shows the pull */
+let guide: { ring: HTMLElement; arrow: HTMLElement } | null = null;
 const fps = { t: 0, n: 0, slow: 0, fast: 0, down: false, up: false };
 let lastTick = 0;
 let holeStart = 0;
@@ -168,13 +164,20 @@ showTitle();
 requestAnimationFrame(frame);
 
 // ---------- helpers ----------
-function unlocked(i: number): boolean {
-  if (i === 0) return true;
-  return (save.stars[COURSES[i - 1].id] ?? 0) >= 1;
+function lid(n: number): string {
+  return `L${n}`;
 }
-function nextCourseIndex(): number {
-  for (let i = 0; i < COURSES.length; i++) if (!save.stars[COURSES[i].id]) return unlocked(i) ? i : Math.max(0, i - 1);
-  return COURSES.length - 1;
+/** A hole of the tour is open once the one before it has been finished (picked up counts). */
+function unlocked(n: number): boolean {
+  return n === 1 || save.best[lid(n - 1)] !== undefined;
+}
+function finished(n: number): boolean {
+  return save.best[lid(n)] !== undefined;
+}
+/** The first hole not finished yet (or the last one). */
+function nextLevel(): number {
+  for (let n = 1; n <= ROUTE_LEN; n++) if (!finished(n)) return n;
+  return ROUTE_LEN;
 }
 function todayDaily(): Daily {
   const base = makeDaily(new Date());
@@ -190,17 +193,18 @@ function isYesterday(key: string): boolean {
   y.setDate(y.getDate() - 1);
   return dayKey(y) === key;
 }
-function roundStrokes(r: Round): number {
-  return r.scores.reduce((a, s) => a + (s.strokes ?? 0), 0);
+function roundStrokes(scores: Score[]): number {
+  return scores.reduce((a, s) => a + (s.strokes ?? 0), 0);
 }
-function roundParPlayed(r: Round): number {
-  return r.scores.reduce((a, s) => a + (s.strokes !== undefined ? s.par : 0), 0);
+function roundParPlayed(scores: Score[]): number {
+  return scores.reduce((a, s) => a + (s.strokes !== undefined ? s.par : 0), 0);
 }
-function roundPar(r: Round): number {
-  return r.scores.reduce((a, s) => a + s.par, 0);
+function roundPar(scores: Score[]): number {
+  return scores.reduce((a, s) => a + s.par, 0);
 }
-function cupAngle(s: Sim): number {
-  return Math.atan2(s.cup.z - s.ball.z, s.cup.x - s.ball.x);
+/** Stars of a hole: 3 under par, 2 at par, 1 finished, 0 picked up. */
+function holeStars(strokes: number, par: number, maxed: boolean): number {
+  return maxed ? 0 : strokes <= par - 1 ? 3 : strokes <= par ? 2 : 1;
 }
 /** A slingshot pull (screen) or keyboard aim (world) as a world-space putt. */
 function toWorld(a: Shot): Aim {
@@ -226,18 +230,32 @@ function aimCamera() {
   if (!sim) return;
   stage.yawTarget = sim.guideAngle(sim.ball.x, sim.ball.z);
 }
+function courseOf(def: HoleDef): ThemeId {
+  return def.course ?? 'garden';
+}
+function curHole(): { def: HoleDef; mods: HoleMods } | null {
+  if (!current) return null;
+  if (current.kind === 'level') return { def: holeDef(current.n), mods: {} };
+  return { def: current.daily.holes[current.cur].hole, mods: current.daily.mods };
+}
+function levelProps(n: number): Record<string, string | number | boolean> {
+  const L = ROUTE[n - 1];
+  return { level: lid(n), num: n, course: L.course, champ: L.champ, intro: L.intro, par: holeDef(n).par };
+}
 
 // ---------- attract mode (the bot plays behind the menus) ----------
 function startAttract() {
-  const h = ALL_HOLES[attractIdx % ALL_HOLES.length];
-  attractIdx++;
-  sim = new Sim(h.hole);
+  // a hole from the part of the tour the player has seen (or the first stretch)
+  const reach = Math.max(12, Math.min(ROUTE_LEN, nextLevel() + 4));
+  const n = 1 + (attractIdx++ % reach);
+  const def = holeDef(n);
+  sim = new Sim(def);
   bot = new Bot(sim, SKILL_DEMO, attractIdx);
-  stage.setLevel(sim, h.course.id);
+  stage.setLevel(sim, courseOf(def));
   stage.mode = 'overview';
   stage.zoom = stage.zoomTarget = 1.08;
   mode = 'attract';
-  round = null;
+  current = null;
   gameplayStop();
   setHudVisible(false);
   input.enabled = false;
@@ -251,26 +269,24 @@ function showTitle() {
   audio.music('menu');
   const d = todayDaily();
   const done = !!save.daily[d.key];
-  const next = nextCourseIndex();
-  const anyStars = store.totalStars() > 0;
+  const next = nextLevel();
+  const any = finished(1);
   titleScreen({
-    playLabel: anyStars ? t('continue') : t('play'),
-    playLevel: anyStars ? COURSES[next].num : null,
+    playLabel: any ? t('continue') : t('play'),
+    playLevel: any ? next : null,
     stars: store.totalStars(),
-    maxStars: COURSES.length * 3,
+    maxStars: ROUTE_LEN * 3,
     dailyNum: d.num,
     dailyDone: done,
     streak: save.streak.last === d.key || isYesterday(save.streak.last) ? save.streak.count : 0,
-    privacyUrl: TARGET_CG && PRIVACY_URL && save.settings.stats !== false && !anyStars ? PRIVACY_URL : undefined,
+    privacyUrl: TARGET_CG && PRIVACY_URL && save.settings.stats !== false && !any ? PRIVACY_URL : undefined,
     onPlay: () => {
       audio.play('click');
-      // very first game: straight onto hole 1 (the tutorial explains it) — one click from the title to playing
-      if (!anyStars && !save.tutorialDone && next === 0) startCourse(0, true);
-      else openCourse(next);
+      openLevel(next);
     },
     onLevels: () => {
       audio.play('click');
-      showLevels();
+      showRoute();
     },
     onDaily: () => {
       audio.play('click');
@@ -283,21 +299,43 @@ function showTitle() {
   });
 }
 
-function showLevels() {
-  levelsScreen(
-    COURSES,
-    save.stars,
-    save.best,
-    unlocked,
-    (i) => {
+function showRoute() {
+  const next = nextLevel();
+  routeScreen({
+    nodes: ROUTE.map((L) => {
+      const c = courseById(L.course);
+      return {
+        n: L.n,
+        color: c.color,
+        stars: save.stars[lid(L.n)] ?? 0,
+        done: finished(L.n),
+        locked: !unlocked(L.n),
+        next: L.n === next && !finished(L.n),
+        intro: L.intro,
+        champ: L.champ,
+        course: tx(c.name),
+        courseId: c.id,
+        won: L.champ && save.trophies.includes(c.id),
+      };
+    }),
+    total: store.totalStars(),
+    max: ROUTE_LEN * 3,
+    trophies: save.trophies.length,
+    maxTrophies: READY.length,
+    more: ROUTE_LEN < FULL_LEN,
+    onPick: (n) => {
       audio.play('click');
-      openCourse(i);
+      openLevel(n);
     },
-    () => {
+    onBack: () => {
       audio.play('click');
       showTitle();
     },
-  );
+    onCabinet: () => {
+      audio.play('click');
+      toast(`${t('cabinet')}: ${save.trophies.length}/${READY.length}`, 'good');
+    },
+  });
 }
 
 function showSettings() {
@@ -321,8 +359,7 @@ function showSettings() {
       } else if (k === 'vibration') {
         st.vibration = v as boolean;
         input.vibration = st.vibration;
-      }
-      else if (k === 'stats') {
+      } else if (k === 'stats') {
         st.stats = v as boolean;
         setAnalyticsEnabled(st.stats);
       } else if (k === 'gfx') {
@@ -353,12 +390,13 @@ function showSettings() {
   });
 }
 
-/** Show a hole on screen (intro or play) without starting it. */
-function loadHole(r: Round) {
-  const h = r.holes[r.cur];
-  sim = new Sim(h.hole, r.mods);
+/** Show a hole on screen (card or play) without starting it. */
+function loadHole() {
+  const h = curHole();
+  if (!h) return;
+  sim = new Sim(h.def, h.mods);
   bot = null;
-  stage.setLevel(sim, h.course.id);
+  stage.setLevel(sim, courseOf(h.def));
   flags.sway = false;
   flags.lastStroke = false;
   clearFloaters();
@@ -367,53 +405,54 @@ function loadHole(r: Round) {
   stage.mode = camMode();
 }
 
-function newRound(kind: Round['kind'], index: number, holes: Round['holes'], mods: HoleMods, daily?: Daily): Round {
-  return { kind, index, daily, holes, mods, cur: 0, scores: holes.map((h) => ({ par: h.hole.par })), t0: performance.now() };
-}
-
-function openCourse(i: number) {
-  const c = COURSES[i];
-  round = newRound('course', i, c.holes.map((hole) => ({ course: c, hole })), {});
-  loadHole(round);
+/** A hole of the tour: its card, or straight onto the green for the first two holes (one click to play). */
+function openLevel(n: number) {
+  n = Math.max(1, Math.min(ROUTE_LEN, n));
+  current = { kind: 'level', n };
+  loadHole();
+  if (n <= 2 && !finished(n)) {
+    startPlay();
+    return;
+  }
+  const L = ROUTE[n - 1];
+  const def = holeDef(n);
+  const c = courseById(L.course);
   mode = 'intro';
   setHudVisible(false);
   input.enabled = false;
   stage.zoomTarget = stage.reducedMotion ? 1 : 1.12;
-  introScreen({
-    course: c,
-    eyebrow: `${t('course')} ${c.num}`,
-    title: tx(c.name),
-    tip: tx(c.tip),
-    holes: c.holes,
+  holeIntroScreen({
+    eyebrow: `${t('holeNum', { n })} · ${tx(c.name)}`,
+    title: tx(def.name),
+    tip: tx(def.tip ?? c.tip),
+    par: def.par,
+    color: c.color,
+    courseId: c.id,
+    course: L.intro ? { name: tx(c.name), star: tx(c.tip) } : null,
+    champ: L.champ ? { trophy: tx(c.cup) } : null,
+    best: save.best[lid(n)],
     onGo: () => startPlay(),
     onBack: () => {
       audio.play('click');
       startAttract();
-      showLevels();
+      showRoute();
     },
   });
 }
 
-function startCourse(i: number, quick = false) {
-  const c = COURSES[i];
-  round = newRound('course', i, c.holes.map((hole) => ({ course: c, hole })), {});
-  loadHole(round);
-  if (quick) startPlay();
-}
-
 function openDaily() {
   const d = todayDaily();
-  round = newRound('daily', 0, d.holes, d.mods, d);
-  loadHole(round);
+  current = { kind: 'daily', daily: d, cur: 0, scores: d.holes.map((h) => ({ par: h.hole.par })), t0: performance.now() };
+  loadHole();
   mode = 'intro';
   setHudVisible(false);
   input.enabled = false;
   const rec = save.daily[d.key];
+  const par = d.holes.reduce((a, h) => a + h.hole.par, 0);
   introScreen({
-    course: d.holes[0].course,
     eyebrow: t('daily'),
     title: t('dailyTitle', { n: d.num }),
-    tip: rec ? t('dailyPlayed', { s: `${rec.score} (${fmtPar(rec.score - d.holes.reduce((a, h) => a + h.hole.par, 0))})` }) : tx(d.mod.label),
+    tip: rec ? t('dailyPlayed', { s: `${rec.score} (${fmtPar(rec.score - par)})` }) : tx(d.mod.label),
     holes: d.holes.map((h) => h.hole),
     extra: `<span class="pill">⚡ ${tx(d.mod.label)}</span>`,
     onGo: () => startPlay(),
@@ -427,7 +466,7 @@ function openDaily() {
 }
 
 function startPlay() {
-  if (!sim || !round) return;
+  if (!sim || !current) return;
   audio.unlock();
   audio.music('game');
   clearScreens();
@@ -445,12 +484,13 @@ function startPlay() {
   updateCamButton();
   acc = 0;
   holeStart = performance.now();
-  const id = round.kind === 'daily' ? `daily-${round.daily!.num}` : COURSES[round.index].id;
-  if (round.cur === 0) {
-    track(round.kind === 'daily' ? 'daily_start' : 'course_start', { level: id, num: round.daily?.num ?? null });
-    if (round.kind === 'course' && round.index === 0 && !save.tutorialDone) showTutorial();
+  if (current.kind === 'level') {
+    track('level_start', levelProps(current.n));
+    if (current.n === 1 && !save.tutorialDone) showTutorial();
+  } else {
+    if (current.cur === 0) track('daily_start', { num: current.daily.num });
+    track('level_start', { level: `daily-${current.daily.num}`, hole: current.cur + 1, src: lid(current.daily.holes[current.cur].n) });
   }
-  track('level_start', { level: round.holes[round.cur].hole.id, round: id });
   showHoleName();
   try {
     (navigator as unknown as { wakeLock?: { request: (t: string) => Promise<{ release: () => Promise<void> }> } }).wakeLock
@@ -462,27 +502,34 @@ function startPlay() {
   }
 }
 
-/** Big card while the camera flies in: hole number, name and par. */
+/** Big card while the camera flies in: hole number, name and par (and, on a skipped presentation, the tip). */
 function showHoleName() {
-  if (!round) return;
-  const h = round.holes[round.cur];
+  if (!current || !sim) return;
   document.querySelector('.holecard')?.remove();
-  const n = el(`<div class="holecard"><small>${t('hole')} ${round.cur + 1}/${round.holes.length}</small><b>${esc(tx(h.hole.name))}</b><span>${t('par')} ${h.hole.par}</span></div>`);
+  const def = sim.def;
+  const small = current.kind === 'level' ? t('holeNum', { n: current.n }) : `${t('hole')} ${current.cur + 1}/${current.daily.holes.length}`;
+  const L = current.kind === 'level' ? ROUTE[current.n - 1] : null;
+  const tip = L && L.intro && current.kind === 'level' && current.n <= 2 && current.n > 1 ? `<i>${esc(tx(courseById(L.course).tip))}</i>` : '';
+  const n = el(`<div class="holecard${tip ? ' long' : ''}"><small>${small}</small><b>${esc(tx(def.name))}</b><span>${t('par')} ${def.par}</span>${tip}</div>`);
   $('#app').appendChild(n);
-  setTimeout(() => n.classList.add('out'), 1700);
-  setTimeout(() => n.remove(), 2200);
+  const ms = tip ? 3600 : 1700;
+  setTimeout(() => n.classList.add('out'), ms);
+  setTimeout(() => n.remove(), ms + 500);
 }
-const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 function pauseGame() {
-  if (mode !== 'play' || !round) return;
+  if (mode !== 'play' || !current || !sim) return;
   mode = 'paused';
   gameplayStop();
   input.reset();
   audio.stopLoops();
   audio.duck(true);
+  const goals =
+    current.kind === 'daily'
+      ? `<div class="eyebrow">${t('goalsNow')}</div>` + cardHtml(current.scores, current.cur)
+      : `<div class="eyebrow">${t('goalsNow')}</div>` + holeGoalsHtml(sim.def.par);
   pauseScreen({
-    goals: `<div class="eyebrow">${t('goalsNow')}</div>` + cardHtml(round.scores, round.cur) + (round.kind === 'course' ? goalsHtml(round.holes.length, roundPar(round)) : ''),
+    goals,
     sfx: save.settings.sfx,
     music: save.settings.music,
     onResume: () => {
@@ -498,7 +545,7 @@ function pauseGame() {
     },
     onMenu: () => {
       audio.duck(false);
-      track('level_quit', { level: sim?.def.id ?? '' });
+      track('level_quit', current?.kind === 'level' ? levelProps(current.n) : { level: sim?.def.id ?? '' });
       startAttract();
       showTitle();
     },
@@ -515,18 +562,18 @@ function pauseGame() {
   });
 }
 
+/** Play the same hole (or the daily round) again, straight away. */
 function retry() {
-  if (!round) return;
-  if (round.kind === 'course') startCourse(round.index);
-  else {
-    const d = round.daily!;
-    round = newRound('daily', 0, d.holes, d.mods, d);
-    loadHole(round);
+  if (!current) return;
+  if (current.kind === 'daily') {
+    const d = current.daily;
+    current = { kind: 'daily', daily: d, cur: 0, scores: d.holes.map((h) => ({ par: h.hole.par })), t0: performance.now() };
   }
+  loadHole();
   startPlay();
 }
 
-// ---------- tutorial ----------
+// ---------- tutorial and the first-hole guide ----------
 function showTutorial() {
   clearTutorial();
   const app = $('#app');
@@ -536,10 +583,30 @@ function showTutorial() {
   input.usedAim = false;
   input.usedShot = false;
   tutT = 0;
+  guide = { ring: el('<div class="guide-ring"></div>'), arrow: el('<div class="guide-arrow"><i></i></div>') };
+  app.appendChild(guide.ring);
+  app.appendChild(guide.arrow);
 }
 function clearTutorial() {
   tutorialNodes.forEach((n) => n.remove());
   tutorialNodes = [];
+  guide?.ring.remove();
+  guide?.arrow.remove();
+  guide = null;
+}
+/** Keep the guide on the ball: the ring round it, the arrow showing which way to pull (straight back from the cup). */
+function updateGuide() {
+  if (!guide || !sim) return;
+  const show = mode === 'play' && sim.state === 'aim' && sim.strokes === 0 && !input.dragging && !stage.introRunning;
+  guide.ring.style.opacity = guide.arrow.style.opacity = show ? '1' : '0';
+  if (!show) return;
+  const b = sim.ball;
+  const p = stage.toScreen(b.x, 0.2, b.z);
+  // pull direction on screen: from the cup back past the ball
+  const c = stage.toScreen(sim.cup.x, 0, sim.cup.z);
+  const ang = Math.atan2(p.y - c.y, p.x - c.x);
+  guide.ring.style.transform = `translate(${p.x}px, ${p.y}px)`;
+  guide.arrow.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${ang}rad)`;
 }
 
 // ---------- events -> feedback ----------
@@ -620,152 +687,76 @@ function handleEvent(ev: SimEvent) {
   }
 }
 
-/** The hole is over: score it, then the next hole (or the end of the round). */
+/** The hole is over: score it, then the end screen (tour) or the next hole (daily). */
 function holeDone() {
   const s = sim!;
-  const r = round!;
+  const cur = current!;
   const res = s.result!;
-  r.scores[r.cur].strokes = res.strokes;
-  r.scores[r.cur].maxed = res.maxed;
   const name = scoreName(res.strokes, res.par, res.maxed);
   const d = res.strokes - res.par;
   banner(name, d <= 0 && !res.maxed ? 'win' : 'lose');
-  track(res.maxed ? 'level_fail' : 'level_complete', { level: s.def.id, strokes: res.strokes, par: res.par, dur: Math.round((performance.now() - holeStart) / 1000) });
-  mode = 'between';
-  betweenT = 2.0;
+  const dur = Math.round((performance.now() - holeStart) / 1000);
   input.enabled = false;
   input.reset();
-}
-
-function nextHole() {
-  const r = round!;
-  if (r.cur + 1 < r.holes.length) {
-    // quick fade to the next hole, then the camera flies in
-    const fade = $('#fade');
-    fade.classList.add('on');
-    setTimeout(() => {
-      r.cur++;
-      loadHole(r);
-      mode = 'play';
-      input.enabled = true;
-      stage.focus = null;
-      stage.zoom = stage.zoomTarget = 1;
-      stage.intro();
-      holeStart = performance.now();
-      track('level_start', { level: r.holes[r.cur].hole.id });
-      showHoleName();
-      fade.classList.remove('on');
-    }, 260);
-    mode = 'fading' as Mode;
-  } else finishRound();
-}
-
-function stars(total: number, par: number): number {
-  return total <= par - 2 ? 3 : total <= par ? 2 : 1;
-}
-
-function shareFor(r: Round): string {
-  const tot = roundStrokes(r);
-  const par = roundPar(r);
-  const row = r.scores.map((s) => (s.strokes === 1 ? '⭐' : (s.strokes ?? 9) < s.par ? '🟩' : s.strokes === s.par ? '🟨' : (s.strokes ?? 9) === s.par + 1 ? '🟧' : '🟥')).join('');
-  const head = r.kind === 'daily' ? `${gameName()} ⛳ ${t('dailyTitle', { n: r.daily!.num })}` : `${gameName()} ⛳ ${tx(COURSES[r.index].name)}`;
-  const rank = r.kind === 'daily' && dailyRank && dailyRank.players > 1 ? ` · 🏆 Top ${Math.max(1, 100 - rankPct(dailyRank))}%` : '';
-  return `${head}\n${tot} (${fmtPar(tot - par)}) ${row}${rank}${GAME_URL ? '\n' + GAME_URL : ''}`;
-}
-function rankPct(rk: { players: number; below: number }): number {
-  return Math.round((rk.below / Math.max(1, rk.players - 1)) * 100);
-}
-function rankText(rk: { players: number; below: number }): string {
-  return rk.players <= 1 ? t('dailyFirst') : t('dailyRank', { p: rankPct(rk), n: rk.players.toLocaleString() });
-}
-
-function finishRound() {
-  const r = round!;
-  const tot = roundStrokes(r);
-  const par = roundPar(r);
-  const st = stars(tot, par);
-  const dur = Math.round((performance.now() - r.t0) / 1000);
-  let best = 0;
-  let newBest = false;
-  let hasNext = false;
-  let footer: string | undefined;
-  let extra = '';
-  let eyebrow = '';
-  let unlockedNext: number | null = null;
-  if (r.kind === 'course') {
-    const c = COURSES[r.index];
-    const wasLocked = r.index < COURSES.length - 1 && !unlocked(r.index + 1);
-    save.stars[c.id] = Math.max(save.stars[c.id] ?? 0, st);
-    const prev = save.best[c.id];
-    if (!prev || tot < prev) {
-      newBest = !!prev;
-      save.best[c.id] = tot;
-    }
-    best = save.best[c.id];
-    if (r.index === 0) save.tutorialDone = true;
-    hasNext = r.index < COURSES.length - 1;
-    if (wasLocked && unlocked(r.index + 1)) unlockedNext = r.index + 2;
-    eyebrow = `${t('course')} ${c.num} · ${tx(c.name)}`;
-    track('course_complete', { level: c.id, strokes: tot, par, stars: st, dur });
-  } else {
-    const d = r.daily!;
-    eyebrow = t('dailyTitle', { n: d.num });
-    const prev = save.daily[d.key];
-    if (!prev || tot < prev.score) {
-      newBest = !!prev;
-      save.daily[d.key] = { score: tot, stars: st, ratio: tot / par, time: dur, win: true };
-    }
-    if (save.streak.last !== d.key) {
-      save.streak.count = isYesterday(save.streak.last) ? save.streak.count + 1 : 1;
-      save.streak.last = d.key;
-    }
-    best = save.daily[d.key].score;
-    footer = t('dailyAgain', { n: d.num + 1 });
-    dailyRank = null;
-    // the shared leaderboard ranks higher scores better: send "par − strokes" so fewer strokes rank higher
-    submitDaily(d.key, d.num, 1000 + par - tot, st, tot / par, dur).then((rk) => {
-      dailyRank = rk;
-      const node = document.getElementById('end-rank');
-      if (!node || !rk) return;
-      node.hidden = false;
-      node.textContent = rankText(rk);
-    });
-    extra = `<div id="end-rank" class="rank" hidden></div>`;
-    track('daily_complete', { num: d.num, strokes: tot, par, stars: st, mod: d.mod.key, dur });
+  clearTutorial();
+  if (cur.kind === 'daily') {
+    cur.scores[cur.cur].strokes = res.strokes;
+    cur.scores[cur.cur].maxed = res.maxed;
+    track('level_complete', { level: `daily-${cur.daily.num}`, hole: cur.cur + 1, strokes: res.strokes, par: res.par, maxed: res.maxed, dur });
+    mode = 'between';
+    betweenT = 2.0;
+    return;
+  }
+  const n = cur.n;
+  const id = lid(n);
+  const st = holeStars(res.strokes, res.par, res.maxed);
+  const prevBest = save.best[id];
+  const newBest = prevBest !== undefined && res.strokes < prevBest;
+  if (prevBest === undefined || res.strokes < prevBest) save.best[id] = res.strokes;
+  save.stars[id] = Math.max(save.stars[id] ?? 0, st);
+  if (n === 1) save.tutorialDone = true;
+  const L = ROUTE[n - 1];
+  const c = courseById(L.course);
+  let trophy = false;
+  if (L.champ && !res.maxed && res.strokes <= res.par && !save.trophies.includes(c.id)) {
+    trophy = true;
+    save.trophies.push(c.id);
+    save.trophyInfo[c.id] = { level: n, strokes: res.strokes, par: res.par, at: Date.now() };
+    track('trophy', { course: c.id, level: id, strokes: res.strokes, par: res.par });
   }
   store.save();
+  track('level_complete', { ...levelProps(n), strokes: res.strokes, stars: st, maxed: res.maxed, dur });
   mode = 'end';
   gameplayStop();
-  if (st === 3) happytime();
-  setHudVisible(false);
-  clearTutorial();
   wakeLock?.release().catch(() => undefined);
   wakeLock = null;
-  audio.play('win');
-  if (unlockedNext) {
-    const n = unlockedNext;
-    setTimeout(() => {
-      if (mode === 'end') {
-        toast(t('unlocked', { n }), 'good', 3200);
-        audio.play('star', 3);
-      }
-    }, 1700);
-  }
-  endScreen({
+  if (st === 3) happytime();
+  setTimeout(() => showHoleEnd(n, res.strokes, res.par, res.maxed, st, newBest, trophy), 1500);
+}
+
+function showHoleEnd(n: number, strokes: number, par: number, maxed: boolean, st: number, newBest: boolean, trophy: boolean) {
+  if (mode !== 'end' || current?.kind !== 'level' || current.n !== n) return;
+  setHudVisible(false);
+  audio.play(st >= 2 ? 'win' : 'lose');
+  const L = ROUTE[n - 1];
+  const c = courseById(L.course);
+  const hasNext = n < ROUTE_LEN;
+  const extra = trophy ? `<div class="trophy-won" style="--c:${c.color}"><span>🏆</span><b>${esc(tx(c.cup))}</b></div>` : '';
+  holeEndScreen({
+    eyebrow: `${t('holeNum', { n })} · ${tx(c.name)}`,
+    title: maxed ? t('pickedUp') : scoreName(strokes, par, false),
+    win: !maxed && strokes <= par,
     stars: st,
-    eyebrow,
-    card: cardHtml(r.scores),
-    total: tot,
+    strokes,
     par,
-    best,
+    best: save.best[lid(n)] ?? 0,
     newBest,
     hasNext,
-    footer,
     extraHtml: extra,
-    shareText: () => shareFor(r),
     onNext: () => {
       audio.play('click');
-      openCourse(r.index + 1);
+      // the first holes go straight on; later ones show their card
+      openLevel(n + 1);
     },
     onRetry: () => {
       audio.play('click');
@@ -776,7 +767,122 @@ function finishRound() {
       startAttract();
       showTitle();
     },
-    onShared: () => track('share', { level: r.kind === 'daily' ? `daily-${r.daily!.num}` : COURSES[r.index].id, strokes: tot }),
+    onRoute: () => {
+      audio.play('click');
+      startAttract();
+      showRoute();
+    },
+    onStar: (i) => {
+      audio.play('star', i);
+      if (save.settings.vibration) vibrate(15);
+    },
+  });
+}
+
+/** Daily round: on to the next of its six holes. */
+function nextHole() {
+  const cur = current;
+  if (!cur || cur.kind !== 'daily') return;
+  if (cur.cur + 1 < cur.daily.holes.length) {
+    const fade = $('#fade');
+    fade.classList.add('on');
+    setTimeout(() => {
+      cur.cur++;
+      loadHole();
+      mode = 'play';
+      input.enabled = true;
+      stage.focus = null;
+      stage.zoom = stage.zoomTarget = 1;
+      stage.intro();
+      holeStart = performance.now();
+      track('level_start', { level: `daily-${cur.daily.num}`, hole: cur.cur + 1, src: lid(cur.daily.holes[cur.cur].n) });
+      showHoleName();
+      fade.classList.remove('on');
+    }, 260);
+    mode = 'fading';
+  } else finishDaily();
+}
+
+function roundStars(total: number, par: number): number {
+  return total <= par - 2 ? 3 : total <= par ? 2 : 1;
+}
+
+function shareFor(cur: Extract<Current, { kind: 'daily' }>): string {
+  const tot = roundStrokes(cur.scores);
+  const par = roundPar(cur.scores);
+  const row = cur.scores.map((s) => (s.strokes === 1 ? '⭐' : (s.strokes ?? 9) < s.par ? '🟩' : s.strokes === s.par ? '🟨' : (s.strokes ?? 9) === s.par + 1 ? '🟧' : '🟥')).join('');
+  const head = `${gameName()} ⛳ ${t('dailyTitle', { n: cur.daily.num })}`;
+  const rank = dailyRank && dailyRank.players > 1 ? ` · 🏆 Top ${Math.max(1, 100 - rankPct(dailyRank))}%` : '';
+  return `${head}\n${tot} (${fmtPar(tot - par)}) ${row}${rank}${GAME_URL ? '\n' + GAME_URL : ''}`;
+}
+function rankPct(rk: { players: number; below: number }): number {
+  return Math.round((rk.below / Math.max(1, rk.players - 1)) * 100);
+}
+function rankText(rk: { players: number; below: number }): string {
+  return rk.players <= 1 ? t('dailyFirst') : t('dailyRank', { p: rankPct(rk), n: rk.players.toLocaleString() });
+}
+
+function finishDaily() {
+  const cur = current;
+  if (!cur || cur.kind !== 'daily') return;
+  const d = cur.daily;
+  const tot = roundStrokes(cur.scores);
+  const par = roundPar(cur.scores);
+  const st = roundStars(tot, par);
+  const dur = Math.round((performance.now() - cur.t0) / 1000);
+  const prev = save.daily[d.key];
+  let newBest = false;
+  if (!prev || tot < prev.score) {
+    newBest = !!prev;
+    save.daily[d.key] = { score: tot, stars: st, ratio: tot / par, time: dur, win: true };
+  }
+  if (save.streak.last !== d.key) {
+    save.streak.count = isYesterday(save.streak.last) ? save.streak.count + 1 : 1;
+    save.streak.last = d.key;
+  }
+  const best = save.daily[d.key].score;
+  dailyRank = null;
+  // the shared leaderboard ranks higher scores better: send "par − strokes" so fewer strokes rank higher
+  submitDaily(d.key, d.num, 1000 + par - tot, st, tot / par, dur).then((rk) => {
+    dailyRank = rk;
+    const node = document.getElementById('end-rank');
+    if (!node || !rk) return;
+    node.hidden = false;
+    node.textContent = rankText(rk);
+  });
+  track('daily_complete', { num: d.num, strokes: tot, par, stars: st, mod: d.mod.key, dur });
+  store.save();
+  mode = 'end';
+  gameplayStop();
+  if (st === 3) happytime();
+  setHudVisible(false);
+  clearTutorial();
+  wakeLock?.release().catch(() => undefined);
+  wakeLock = null;
+  audio.play('win');
+  endScreen({
+    stars: st,
+    eyebrow: t('dailyTitle', { n: d.num }),
+    card: cardHtml(cur.scores),
+    total: tot,
+    par,
+    best,
+    newBest,
+    hasNext: false,
+    footer: t('dailyAgain', { n: d.num + 1 }),
+    extraHtml: `<div id="end-rank" class="rank" hidden></div>`,
+    shareText: () => shareFor(cur),
+    onNext: () => undefined,
+    onRetry: () => {
+      audio.play('click');
+      retry();
+    },
+    onMenu: () => {
+      audio.play('click');
+      startAttract();
+      showTitle();
+    },
+    onShared: () => track('share', { level: `daily-${d.num}`, strokes: tot }),
     onStar: (i) => {
       audio.play('star', i);
       if (save.settings.vibration) vibrate(15);
@@ -843,7 +949,7 @@ function tick(dt: number) {
   const s = sim;
   if (!s) return;
   let steps = 0;
-  if (mode === 'play' || mode === 'between') {
+  if (mode === 'play' || mode === 'between' || (mode === 'end' && current?.kind === 'level')) {
     // the player can putt once the camera has flown in
     input.enabled = mode === 'play' && !stage.introRunning;
     stage.lockYaw = input.dragging;
@@ -887,7 +993,7 @@ function tick(dt: number) {
       return;
     }
   } else if (mode === 'intro') {
-    // moving obstacles keep moving while the intro card is up
+    // moving obstacles keep moving while the card is up
     acc += dt;
     while (acc >= SIM_DT && steps < 14) {
       s.step();
@@ -901,24 +1007,32 @@ function tick(dt: number) {
   time += paused ? 0 : dt;
   if (rec.render) stage.frame(paused ? 0 : dt, time);
 
-  if (mode === 'play' || mode === 'between' || mode === 'fading') {
-    const r = round!;
+  if (current && (mode === 'play' || mode === 'between' || mode === 'fading')) {
     audio.loops(stage.theme.surround, dt);
-    updateHud({
-      hole: r.cur + 1,
-      holes: r.holes.length,
-      name: tx(r.holes[r.cur].hole.name),
-      par: s.def.par,
-      strokes: s.strokes,
-      max: s.maxStrokes,
-      total: roundStrokes(r),
-      totalPar: roundParPlayed(r),
-    });
+    if (current.kind === 'level') {
+      updateHud({ hole: current.n, holes: 0, name: tx(s.def.name), par: s.def.par, strokes: s.strokes, max: s.maxStrokes, total: 0, totalPar: -1 });
+    } else {
+      const cur = current;
+      updateHud({
+        hole: cur.cur + 1,
+        holes: cur.daily.holes.length,
+        name: tx(s.def.name),
+        par: s.def.par,
+        strokes: s.strokes,
+        max: s.maxStrokes,
+        total: roundStrokes(cur.scores),
+        totalPar: roundParPlayed(cur.scores),
+      });
+    }
     if (tutorialNodes.length) {
       tutT += dt;
-      if (input.usedShot || tutT > 40) clearTutorial();
+      if (input.usedShot || tutT > 40) {
+        tutorialNodes.forEach((n) => n.remove());
+        tutorialNodes = [];
+      }
     }
   }
+  updateGuide();
   if (mode === 'between') {
     betweenT -= dt;
     if (betweenT <= 0) nextHole();
@@ -934,25 +1048,30 @@ function tick(dt: number) {
   get sim() {
     return sim;
   },
-  get round() {
-    return round;
+  get current() {
+    return current;
   },
   get input() {
     return input;
+  },
+  get save() {
+    return save;
   },
   get info() {
     const r = stage.renderer.info;
     return { calls: r.render.calls, tris: r.render.triangles, geos: r.memory.geometries, tex: r.memory.textures };
   },
   stage,
-  openCourse,
+  openLevel,
   openDaily,
   startPlay,
-  /** jump to a hole of the open round (testing only) */
+  showRoute,
+  champLevel,
+  /** jump to a hole of the daily round (testing only) */
   goHole(i: number) {
-    if (!round) return;
-    round.cur = i;
-    loadHole(round);
+    if (current?.kind !== 'daily') return;
+    current.cur = i;
+    loadHole();
   },
   /** let the PRO bot putt for the next `sec` seconds (testing only) */
   bot(sec: number) {
@@ -981,5 +1100,3 @@ function tick(dt: number) {
     rec.render = true;
   },
 };
-
-void coursePar;

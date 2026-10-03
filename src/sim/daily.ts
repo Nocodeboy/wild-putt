@@ -1,6 +1,9 @@
-import { ALL_HOLES } from './courses';
 import { hashString, Rng } from './rng';
-import type { CourseDef, HoleDef, HoleMods, Txt } from './types';
+import { holeDef, ROUTE, ROUTE_LEN } from './route';
+import type { HoleDef, HoleMods, ThemeId, Txt } from './types';
+
+// The daily round (docs/diseno-v2.md §5.9): six holes of the route from six different courses, the same for
+// everybody, with a modifier. No aim-line upgrade and no mulligan.
 
 export const DAILY_EPOCH = Date.UTC(2026, 9, 3); // Daily #1 = 3 Oct 2026
 export const DAILY_HOLES = 6;
@@ -9,7 +12,7 @@ export interface DailyModifier {
   key: 'none' | 'ice' | 'sticky' | 'wind' | 'mirror' | 'tiny';
   label: Txt;
 }
-const MODS: DailyModifier[] = [
+export const MODS: DailyModifier[] = [
   { key: 'none', label: { es: 'Recorrido clásico', en: 'Classic round' } },
   { key: 'ice', label: { es: 'Greens helados', en: 'Icy greens' } },
   { key: 'sticky', label: { es: 'Hierba alta', en: 'Long grass' } },
@@ -18,10 +21,15 @@ const MODS: DailyModifier[] = [
   { key: 'tiny', label: { es: 'Hoyos pequeños', en: 'Tiny cups' } },
 ];
 
+export interface DailyHole {
+  n: number;
+  course: ThemeId;
+  hole: HoleDef;
+}
 export interface Daily {
   num: number;
   key: string;
-  holes: { course: CourseDef; hole: HoleDef }[];
+  holes: DailyHole[];
   mods: HoleMods;
   mod: DailyModifier;
 }
@@ -40,17 +48,19 @@ export function makeDaily(d = new Date(), salt = 0): Daily {
   const key = dayKey(d);
   const num = dailyNumber(d);
   const rng = new Rng(hashString('wildputt-' + key + (salt ? '#' + salt : '')));
-  // one hole from each course, so every daily tours all the worlds
-  const holes = [] as { course: CourseDef; hole: HoleDef }[];
-  const byCourse = new Map<string, typeof ALL_HOLES>();
-  for (const h of ALL_HOLES) {
-    if (!byCourse.has(h.course.id)) byCourse.set(h.course.id, []);
-    byCourse.get(h.course.id)!.push(h);
+  // candidates: ordinary holes of the route (no presentations, no cups), from the 3rd on
+  const pool = ROUTE.filter((L) => L.n >= 3 && L.n <= ROUTE_LEN && !L.intro && !L.champ);
+  const courses = [...new Set(pool.map((L) => L.course))];
+  for (let i = courses.length - 1; i > 0; i--) {
+    const j = Math.floor(rng.next() * (i + 1));
+    [courses[i], courses[j]] = [courses[j], courses[i]];
   }
-  for (const list of byCourse.values()) {
-    const pick = list[Math.floor(rng.next() * list.length)];
-    holes.push({ course: pick.course, hole: pick.hole });
-  }
+  const holes: DailyHole[] = courses.slice(0, DAILY_HOLES).map((c) => {
+    const L = rng.pick(pool.filter((x) => x.course === c));
+    return { n: L.n, course: c, hole: holeDef(L.n) };
+  });
+  // easiest first: the round warms up
+  holes.sort((a, b) => a.hole.par - b.hole.par || a.n - b.n);
   const mod = rng.pick(MODS);
   const ang = rng.range(0, Math.PI * 2);
   const mods: HoleMods = {
@@ -59,5 +69,5 @@ export function makeDaily(d = new Date(), salt = 0): Daily {
     mirror: mod.key === 'mirror',
     cup: mod.key === 'tiny' ? 0.8 : 1,
   };
-  return { num, key, holes: holes.slice(0, DAILY_HOLES), mods, mod };
+  return { num, key, holes, mods, mod };
 }

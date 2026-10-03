@@ -13,5 +13,5 @@ export function playHole(def: HoleDef, skill: 'pro' | 'casual', seed: number, mo
     sim.step();
     sim.events.length = 0;
   }
-  return sim.result ?? { strokes: def.par + 4, par: def.par, maxed: true };
+  return sim.result ?? { strokes: def.par + 3, par: def.par, maxed: true };
 }

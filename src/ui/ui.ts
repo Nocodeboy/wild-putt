@@ -2,8 +2,7 @@ import { fmtPar, gameName, getLang, scoreName, t, tx } from '../i18n';
 import type { EdgeMark, Label } from '../render/view';
 import type { Stage } from '../render/stage';
 import { hexStr, THEMES } from '../render/themes';
-import type { CourseDef } from '../sim/types';
-import { IC } from './icons';
+import { COURSE_IC, IC } from './icons';
 
 export const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
 
@@ -13,7 +12,7 @@ export function el(html: string): HTMLElement {
   return d.firstElementChild as HTMLElement;
 }
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+export const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 export function fmtTime(sec: number): string {
   const s = Math.max(0, Math.ceil(sec));
@@ -72,7 +71,7 @@ export function titleScreen(o: TitleOpts) {
     <div class="menu">
       <button class="btn big" data-a="play" data-focus>${IC.play}${esc(o.playLabel)}${o.playLevel ? `<span class="lvtag">${o.playLevel}</span>` : ''}</button>
       <div class="row">
-        <button class="btn ghost" data-a="levels">${IC.grid}${t('levels')}</button>
+        <button class="btn ghost" data-a="levels">${IC.route}${t('routeBtn')}</button>
         <button class="btn amber daily-btn" data-a="daily">${IC.cal}#${o.dailyNum}${o.streak > 0 ? `<span class="badge">🔥 ${o.streak}</span>` : o.dailyDone ? `<span class="badge">✓</span>` : ''}</button>
       </div>
       <div class="foot"><button class="icon-btn" data-a="settings" aria-label="${t('settings')}">${IC.gear}</button><span class="starcount"><span class="star-on">★</span> ${o.stars}/${o.maxStars}</span><span>${t('credits')}</span></div>
@@ -86,48 +85,190 @@ export function titleScreen(o: TitleOpts) {
   show(n);
 }
 
-export function coursePar(c: CourseDef): number {
-  return c.holes.reduce((a, h) => a + h.par, 0);
+// ---------------- the world tour ----------------
+export interface RouteNode {
+  n: number;
+  color: string;
+  stars: number;
+  /** finished (stars may be 0 if the ball was picked up) */
+  done: boolean;
+  locked: boolean;
+  next: boolean;
+  intro: boolean;
+  champ: boolean;
+  course: string;
+  courseId: string;
+  won: boolean;
 }
-
-export function levelsScreen(courses: CourseDef[], stars: Record<string, number>, best: Record<string, number>, unlocked: (i: number) => boolean, onPick: (i: number) => void, onBack: () => void) {
-  const total = courses.reduce((a, c) => a + (stars[c.id] ?? 0), 0);
-  const cards = courses
-    .map((c, i) => {
-      const th = THEMES[c.id];
-      const bg = `linear-gradient(160deg, ${hex(th.sky)} 0%, ${hex(th.outside)} 62%, ${th.green[1]} 100%)`;
-      const lock = !unlocked(i);
-      const b = best[c.id];
-      return `<button class="lvl${lock ? ' locked' : ''}" data-i="${i}" style="background:${bg}" ${lock ? 'aria-disabled="true"' : ''}>
-        <span class="num">${c.num}</span>${!lock && !stars[c.id] ? `<span class="new">${t('newTag')}</span>` : ''}
-        <span class="nm">${esc(tx(c.name))}</span>
-        <span class="st"><span>${lock ? '🔒' : starsTxt(stars[c.id] ?? 0)}</span>${b ? `<small>${b} (${fmtPar(b - coursePar(c))})</small>` : ''}</span>
-      </button>`;
+/** A winding path of holes from the bottom (hole 1) up, with a stamp where each course opens. */
+export function routeScreen(o: { nodes: RouteNode[]; total: number; max: number; trophies: number; maxTrophies: number; more: boolean; onPick: (n: number) => void; onBack: () => void; onCabinet: () => void }) {
+  const STEP = 84;
+  const N = o.nodes.length;
+  const H = N * STEP + 150;
+  const pos = (n: number) => ({ x: 50 + Math.sin(n * 0.78) * 27, y: H - 80 - (n - 1) * STEP });
+  const path = (list: RouteNode[]) => list.map((nd, i) => `${i ? 'L' : 'M'}${pos(nd.n).x.toFixed(1)} ${pos(nd.n).y}`).join(' ');
+  const reached = o.nodes.filter((nd) => !nd.locked);
+  const stampPos = (x: number) => {
+    const free = x < 50 ? 100 - x : x;
+    const left = x < 50 ? `calc(${((x + 100) / 2).toFixed(1)}% + 14px)` : `calc(${(x / 2).toFixed(1)}% - 14px)`;
+    return `left:${left};--mw:calc(${free.toFixed(1)}% - 50px)`;
+  };
+  const nodes = o.nodes
+    .map((nd) => {
+      const p = pos(nd.n);
+      const cls = `rnode${nd.champ ? ' big' : ''}${nd.locked ? ' locked' : ''}${nd.next ? ' next' : ''}${nd.done ? ' done' : ''}`;
+      const inner = nd.locked ? IC.lock : nd.champ ? `${IC.trophy}<b>${nd.n}</b>` : `<b>${nd.n}</b>`;
+      const stars = nd.done ? `<span class="rstars">${starsTxt(nd.stars)}</span>` : '';
+      const stamp = nd.intro
+        ? `<div class="stamp${nd.locked ? ' locked' : ''}" style="${stampPos(p.x)};top:${p.y}px;--c:${nd.color};--rot:${p.x < 50 ? 7 : -7}deg"><span class="st-ic">${COURSE_IC[nd.courseId] ?? ''}</span><b>${esc(nd.course)}</b></div>`
+        : '';
+      return `${stamp}<button class="${cls}" data-n="${nd.n}" style="left:${p.x}%;top:${p.y}px;--c:${nd.color}" aria-label="${t('hole')} ${nd.n}">${inner}${stars}${nd.champ ? `<span class="rbig">${nd.won ? '🏆 ' : ''}${t('cupShort')}</span>` : ''}</button>`;
     })
     .join('');
   const n = el(`
-  <div class="screen dim">
-    <div class="panel wide">
-      <div class="tape"></div>
-      <div class="panel-head"><div class="eyebrow"><span class="star-on">★</span> ${total}/${courses.length * 3}</div><h2>${t('levels')}</h2></div>
-      <div class="panel-body">
-        <div class="levels">${cards}</div>
-        <div class="actions"><button class="btn ghost" data-a="back" data-focus>${IC.back}${t('back')}</button></div>
+  <div class="screen route-screen">
+    <div class="route-head"><div class="eyebrow"><span class="star-on">★</span> ${o.total}/${o.max}</div><h2>${t('route')}</h2></div>
+    <div class="route-scroll">
+      <div class="route" style="height:${H}px">
+        <svg class="trail" viewBox="0 0 100 ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="${path(o.nodes)}"/><path class="done" d="${path(reached)}"/></svg>
+        ${o.more ? `<div class="route-more" style="top:20px">${esc(t('moreSoon'))}</div>` : ''}
+        ${nodes}
       </div>
     </div>
+    <div class="route-foot"><button class="btn ghost" data-a="back" data-focus aria-label="${t('back')}" style="flex:0 0 60px;padding:0">${IC.back}</button><button class="btn amber album-btn" data-a="cabinet">${IC.trophy}${t('cabinet')} <small>${o.trophies}/${o.maxTrophies}</small></button></div>
   </div>`);
-  n.querySelectorAll<HTMLElement>('.lvl').forEach((b) =>
+  n.querySelector('[data-a=cabinet]')!.addEventListener('click', o.onCabinet);
+  n.querySelectorAll<HTMLElement>('.rnode').forEach((b) =>
     b.addEventListener('click', () => {
-      const i = Number(b.dataset.i);
-      if (!unlocked(i)) {
+      const k = Number(b.dataset.n);
+      if (b.classList.contains('locked')) {
         toast(t('locked'), 'warn');
         return;
       }
-      onPick(i);
+      o.onPick(k);
     }),
   );
-  n.querySelector('[data-a=back]')!.addEventListener('click', onBack);
+  n.querySelector('[data-a=back]')!.addEventListener('click', o.onBack);
   show(n);
+  const next = n.querySelector<HTMLElement>('.rnode.next') ?? n.querySelector<HTMLElement>('.rnode:not(.locked)');
+  const sc = n.querySelector<HTMLElement>('.route-scroll')!;
+  if (next) sc.scrollTop = next.offsetTop - sc.clientHeight / 2;
+  else sc.scrollTop = sc.scrollHeight;
+}
+
+/** What the stars of a hole ask for. */
+export function holeGoalsHtml(par: number, now?: number): string {
+  const mark = (ok: boolean) => (now === undefined ? '' : `<span class="gchk ${ok ? 'ok' : ''}">${ok ? '✓' : '·'}</span>`);
+  return `<div class="goals">
+    <div class="goal"><span class="stars">${starsTxt(1)}</span><span>${t('hgoal1')}</span>${mark(now !== undefined)}</div>
+    <div class="goal"><span class="stars">${starsTxt(2)}</span><span>${t('hgoal2', { p: par })}</span>${mark(now !== undefined && now <= par)}</div>
+    <div class="goal"><span class="stars">${starsTxt(3)}</span><span>${t('hgoal3', { p: par - 1 })}</span>${mark(now !== undefined && now <= par - 1)}</div>
+  </div>`;
+}
+
+export interface HoleIntroOpts {
+  eyebrow: string;
+  title: string;
+  tip: string;
+  par: number;
+  color: string;
+  courseId: string;
+  /** the hole opens a new course: its card */
+  course?: { name: string; star: string } | null;
+  champ?: { trophy: string } | null;
+  best?: number;
+  extra?: string;
+  onGo: () => void;
+  onBack: () => void;
+}
+/** The card before a hole of the tour. */
+export function holeIntroScreen(o: HoleIntroOpts) {
+  const n = el(`
+  <div class="screen dim">
+    <div class="panel intro${o.champ ? ' champ' : ''}">
+      <div class="tape"></div>
+      <div class="panel-head"><div class="eyebrow">${esc(o.eyebrow)}</div><h2>${esc(o.title)}</h2></div>
+      <div class="panel-body">
+        ${o.course ? `<div class="region-card" style="--c:${o.color}"><span class="rc-ic">${COURSE_IC[o.courseId] ?? ''}</span><div><small>${t('newCourse')}</small><b>${esc(o.course.star)}</b></div></div>` : ''}
+        ${o.champ ? `<div class="region-card champ-card" style="--c:#ffc43d"><span class="rc-ic">${IC.trophy}</span><div><small>${t('cupHole')}</small><b>${esc(t('cupCard', { t: o.champ.trophy }))}</b></div></div>` : ''}
+        ${o.course || o.champ ? '' : `<div class="tip"><span class="tipicons">${COURSE_IC[o.courseId] ?? IC.hole}</span><p>${esc(o.tip)}</p></div>`}
+        ${holeGoalsHtml(o.par)}
+        <div class="meta"><span class="pill">${IC.putter}${t('par')} ${o.par}</span>${o.best ? `<span class="pill">${IC.retry}${t('best')} ${o.best}</span>` : ''}${o.extra ?? ''}</div>
+        <div class="actions">
+          <button class="btn ghost" data-a="back" aria-label="${t('back')}" style="flex:0 0 60px;padding:0">${IC.back}</button>
+          <button class="btn big" data-a="go" data-focus style="flex:1 1 160px">${t('go')}</button>
+        </div>
+      </div>
+    </div>
+  </div>`);
+  n.querySelector('[data-a=go]')!.addEventListener('click', o.onGo);
+  n.querySelector('[data-a=back]')!.addEventListener('click', o.onBack);
+  show(n);
+}
+
+export interface HoleEndOpts {
+  eyebrow: string;
+  title: string;
+  win: boolean;
+  stars: number;
+  strokes: number;
+  par: number;
+  best: number;
+  newBest: boolean;
+  hasNext: boolean;
+  /** extra blocks (coins, trophy, ads) */
+  extraHtml?: string;
+  onNext: () => void;
+  onRetry: () => void;
+  onMenu: () => void;
+  onRoute: () => void;
+  onStar: (i: number) => void;
+}
+/** The result of one hole of the tour. */
+export function holeEndScreen(o: HoleEndOpts): HTMLElement {
+  const n = el(`
+  <div class="screen dim">
+    <div class="panel">
+      <div class="tape"></div>
+      <div class="panel-head" style="text-align:center"><div class="eyebrow">${esc(o.eyebrow)}</div></div>
+      <div class="panel-body">
+        <h2 class="end-title ${o.win ? 'win' : 'lose'} ${fit(o.title, 11)}">${esc(o.title)}</h2>
+        <div class="bigstars"><span>★</span><span>★</span><span>★</span></div>
+        <div class="bigscore"><b>${o.strokes}</b><span>${t('par')} ${o.par} · ${fmtPar(o.strokes - o.par)}</span></div>
+        ${o.newBest ? `<div class="newbest">${t('newBest')}</div>` : o.best > 0 && o.best < o.strokes ? `<div class="muted" style="text-align:center">${t('best')}: ${o.best}</div>` : ''}
+        ${o.extraHtml ?? ''}
+        <div class="actions">
+          ${o.hasNext ? `<button class="btn big" data-a="next" data-focus style="flex:1 1 100%">${t('nextHole')}${IC.next}</button>` : `<button class="btn big" data-a="route" data-focus style="flex:1 1 100%">${IC.route}${t('route')}</button>`}
+        </div>
+        <div class="actions">
+          <button class="btn ghost" data-a="retry" aria-label="${t('restart')}" style="flex:0 0 60px;padding:0">${IC.retry}</button>
+          ${o.hasNext ? `<button class="btn ghost" data-a="route" style="flex:1 1 120px;padding:0 12px;min-width:0">${IC.route}${t('route')}</button>` : ''}
+          <button class="btn ghost" data-a="menu" aria-label="${t('menu')}" style="flex:0 0 60px;padding:0">${IC.home}</button>
+        </div>
+      </div>
+    </div>
+  </div>`);
+  n.querySelector('[data-a=next]')?.addEventListener('click', o.onNext);
+  n.querySelectorAll('[data-a=route]').forEach((b) => b.addEventListener('click', o.onRoute));
+  n.querySelector('[data-a=retry]')!.addEventListener('click', o.onRetry);
+  n.querySelector('[data-a=menu]')!.addEventListener('click', o.onMenu);
+  show(n);
+  const stars = n.querySelectorAll<HTMLElement>('.bigstars span');
+  stars.forEach((st, i) => {
+    setTimeout(() => {
+      st.classList.add('show');
+      if (i < o.stars) {
+        st.classList.add('on');
+        o.onStar(i);
+      }
+    }, 350 + i * 380);
+  });
+  return n;
+}
+
+/** Shrinks a long title on small screens. */
+export function fit(s: string, max: number): string {
+  return s.length > max + 6 ? 'fit2' : s.length > max ? 'fit1' : '';
 }
 
 export function goalsHtml(holes: number, par: number): string {
@@ -158,7 +299,6 @@ export function cardHtml(holes: { par: number; strokes?: number; maxed?: boolean
 }
 
 export interface IntroOpts {
-  course: CourseDef;
   eyebrow: string;
   title: string;
   tip: string;
@@ -514,13 +654,16 @@ export function updateHud(s: HudState) {
   const key = JSON.stringify(s);
   if (key === lastHud) return;
   lastHud = key;
-  $('#hud-hole .hn').textContent = `${t('hole')} ${s.hole}/${s.holes}`;
+  $('#hud-hole .hn').textContent = s.holes ? `${t('hole')} ${s.hole}/${s.holes}` : t('holeNum', { n: s.hole });
   $('#hud-hole .hname').textContent = s.name;
   $('#hud-par').textContent = `${t('par')} ${s.par}`;
   const st = $('#hud-strokes');
   st.lastElementChild!.textContent = `${s.strokes}`;
   st.classList.toggle('bad', s.strokes >= s.max - 1);
-  $('#hud-total').textContent = s.totalPar ? `${t('total')} ${fmtPar(s.total - s.totalPar)}` : `${t('total')} E`;
+  const tot = $('#hud-total');
+  // (the tour plays one hole at a time: no round total)
+  tot.hidden = s.totalPar < 0;
+  tot.textContent = s.totalPar > 0 ? `${t('total')} ${fmtPar(s.total - s.totalPar)}` : `${t('total')} E`;
 }
 export function resetHudCache() {
   lastHud = '';

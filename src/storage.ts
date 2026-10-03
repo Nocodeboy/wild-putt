@@ -1,11 +1,9 @@
-import type { Lang } from './sim/types';
+import type { Lang, ThemeId } from './sim/types';
 
 export interface Settings {
   sfx: boolean;
   music: boolean;
   vibration: boolean;
-  /** legacy field from v1 builds, ignored */
-  quality?: 'high' | 'low';
   gfx: 'auto' | 'high' | 'medium' | 'low';
   /** last tier chosen by the automatic mode on this device */
   autoTier: 'high' | 'medium' | 'low' | null;
@@ -23,9 +21,35 @@ export interface DailyRecord {
   time: number;
   win: boolean;
 }
+export interface TrophyRecord {
+  level: number;
+  strokes: number;
+  par: number;
+  /** when it was won (ms) */
+  at: number;
+}
+export interface AdCounters {
+  /** hole ends (route holes and daily rounds) since the install */
+  levelEnds: number;
+  sinceInterstitial: number;
+  lastInterstitial: number;
+  /** last full-screen ad of any kind (rewarded ones too) */
+  lastFullscreen: number;
+  /** free coins in the shop: local date of the last claims, how many, and when (24 h guard) */
+  freeDay: string;
+  freeClaims: number;
+  freeTimes: number[];
+}
+/** Store purchases that are kept for good (non-consumables). */
+export interface Owned {
+  remove_ads: boolean;
+  starter_pack: boolean;
+}
 export interface Save {
-  v: 1;
+  v: 2;
+  /** stars per route hole id ("L1".."L120"): 0 when finished by picking up, 1-3 otherwise */
   stars: Record<string, number>;
+  /** fewest strokes per route hole */
   best: Record<string, number>;
   daily: Record<string, DailyRecord>;
   streak: { count: number; last: string };
@@ -33,15 +57,30 @@ export interface Save {
   tutorialDone: boolean;
   firstOpen: boolean;
   seenTips: string[];
-  /** hole-in-ones over all time (a stat for the end screens and, later, achievements) */
+  /** hole-in-ones over all time */
   aces: number;
+  coins: number;
+  /** aim line level (0-3), never used in the daily round */
+  aim: number;
+  /** balls bought, and the one in play */
+  balls: string[];
+  ball: string;
+  /** courses whose cup hole has been won at par or better */
+  trophies: ThemeId[];
+  trophyInfo: Record<string, TrophyRecord>;
+  ads: AdCounters;
+  /** daily-round rewards in the last 24 h (whatever the phone's date says) */
+  dailyTimes: number[];
+  /** store purchases (non-consumables) and the purchase tokens already granted: they survive a progress reset */
+  owned: Owned;
+  iapTokens: string[];
 }
 
-const KEY = 'wildputt.v1';
+const KEY = 'wildputt.v2';
 
 function fresh(): Save {
   return {
-    v: 1,
+    v: 2,
     stars: {},
     best: {},
     daily: {},
@@ -51,7 +90,43 @@ function fresh(): Save {
     firstOpen: true,
     seenTips: [],
     aces: 0,
+    coins: 0,
+    aim: 0,
+    balls: ['classic'],
+    ball: 'classic',
+    trophies: [],
+    trophyInfo: {},
+    ads: { levelEnds: 0, sinceInterstitial: 0, lastInterstitial: 0, lastFullscreen: 0, freeDay: '', freeClaims: 0, freeTimes: [] },
+    dailyTimes: [],
+    owned: { remove_ads: false, starter_pack: false },
+    iapTokens: [],
   };
+}
+
+/** Any stored save (local or from the portal) -> a complete, sane v2 save. */
+export function migrate(raw: unknown): Save {
+  const f = fresh();
+  if (!raw || typeof raw !== 'object') return f;
+  const s = raw as Partial<Save>;
+  const out: Save = {
+    ...f,
+    ...s,
+    v: 2,
+    settings: { ...f.settings, ...(s.settings ?? {}) },
+    ads: { ...f.ads, ...(s.ads ?? {}), freeTimes: [...(s.ads?.freeTimes ?? [])] },
+    stars: { ...(s.stars ?? {}) },
+    best: { ...(s.best ?? {}) },
+    trophies: [...(s.trophies ?? [])],
+    trophyInfo: { ...(s.trophyInfo ?? {}) },
+    balls: Array.isArray(s.balls) && s.balls.length ? [...new Set(['classic', ...s.balls.filter((x) => typeof x === 'string')])] : ['classic'],
+    dailyTimes: [...(s.dailyTimes ?? [])],
+    owned: { remove_ads: !!s.owned?.remove_ads, starter_pack: !!s.owned?.starter_pack },
+    iapTokens: Array.isArray(s.iapTokens) ? s.iapTokens.filter((x) => typeof x === 'string') : [],
+    coins: Math.max(0, Math.floor(Number(s.coins) || 0)),
+    aim: Math.max(0, Math.min(3, Math.floor(Number(s.aim) || 0))),
+  };
+  if (!out.balls.includes(out.ball)) out.ball = 'classic';
+  return out;
 }
 
 let mem: Save = fresh();
@@ -59,10 +134,7 @@ let mem: Save = fresh();
 export function load(): Save {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const s = JSON.parse(raw) as Save;
-      mem = { ...fresh(), ...s, settings: { ...fresh().settings, ...s.settings } };
-    }
+    if (raw) mem = migrate(JSON.parse(raw));
   } catch {
     /* private mode or blocked storage: keep in memory */
   }
@@ -91,17 +163,12 @@ export function useCloud(kv: KV): boolean {
   }
   if (raw) {
     try {
-      const s = JSON.parse(raw) as Save;
       const before = JSON.stringify(mem);
-      const settings = { ...fresh().settings, ...s.settings };
-      const merged = { ...fresh(), ...s };
+      const merged = migrate(JSON.parse(raw));
+      const settings = merged.settings;
       Object.assign(mem, merged, { settings: mem.settings });
       Object.assign(mem.settings, settings);
-      try {
-        localStorage.setItem(KEY, JSON.stringify(mem));
-      } catch {
-        /* ignore */
-      }
+      if (JSON.stringify(mem) !== raw) save();
       return JSON.stringify(mem) !== before;
     } catch {
       /* unreadable portal copy: keep the local save and overwrite it below */
@@ -129,11 +196,15 @@ export function data(): Save {
   return mem;
 }
 
+/**
+ * Wipes progress, coins, balls and trophies; keeps the settings, the ad counters (so resetting never shows more ads)
+ * and what was bought in the store (remove ads, the starter pack and the tokens already granted).
+ */
 export function reset() {
-  const settings = mem.settings;
-  mem = fresh();
-  mem.settings = settings;
-  mem.firstOpen = false;
+  const { settings, ads, owned, iapTokens } = mem;
+  const fr = fresh();
+  Object.keys(mem).forEach((k) => delete (mem as unknown as Record<string, unknown>)[k]);
+  Object.assign(mem, fr, { settings, ads, owned, iapTokens, firstOpen: false });
   save();
 }
 

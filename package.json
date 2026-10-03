@@ -13,7 +13,8 @@
     "build:dev": "node build.mjs --dev",
     "typecheck": "tsc --noEmit -p .",
     "serve": "python3 -m http.server 8765 --bind 127.0.0.1 -d dist",
-    "bot": "tsx tools/bot.ts 10",
+    "bot": "tsx tools/bot.ts 6",
+    "route-table": "tsx tools/route-table.ts --jobs=2",
     "daily-table": "tsx tools/daily-table.ts",
     "deploy:web": "node build.mjs && cd dist/web && npx vercel@latest deploy --prod"
   },

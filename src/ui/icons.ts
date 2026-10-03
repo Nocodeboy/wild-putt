@@ -29,6 +29,25 @@ export const IC = {
   oldbark: s('<path d="M4 10v4h3l4 3V7L7 10z" fill="currentColor"/><path d="M15 9c1 .8 1.5 1.8 1.5 3s-.5 2.2-1.5 3M18 6.5c1.8 1.4 2.8 3.3 2.8 5.5s-1 4.1-2.8 5.5"/>'),
   sneak: s('<path d="M4 16c2-1 3-3 6-3s4 2 6 2 3-1 4-2"/><path d="M6 20h12"/><circle cx="7" cy="9" r="1.6" fill="currentColor"/><circle cx="12" cy="7" r="1.6" fill="currentColor"/><circle cx="17" cy="9" r="1.6" fill="currentColor"/>'),
   sun: s('<path d="M3 17h18"/><path d="M6.5 17a5.5 5.5 0 0 1 11 0"/><path d="M12 6.5v2M5.5 9.5l1.4 1.4M18.5 9.5l-1.4 1.4"/>'),
+  lock: s('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+  trophy: s('<path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4.5a2.5 2.5 0 0 0 2.6 3.6M17 6h2.5a2.5 2.5 0 0 1-2.6 3.6M12 14v3M8 21h8M9.5 17h5v4h-5z"/>'),
+  route: s('<circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M8 18h6a3 3 0 0 0 0-6h-4a3 3 0 0 1 0-6h6"/>'),
   alert: c('<circle cx="12" cy="12" r="10" fill="#ff4b3a"/><rect x="10.6" y="5.5" width="2.8" height="8.5" rx="1.4" fill="#fff"/><circle cx="12" cy="17.6" r="1.7" fill="#fff"/>'),
 };
 
+
+/** One symbol per course (stamps on the tour, course cards). */
+export const COURSE_IC: Record<string, string> = {
+  garden: s('<path d="M12 21v-6"/><circle cx="12" cy="9" r="6"/><path d="M5 21h14"/>'),
+  roofs: s('<path d="M3 12 12 4l9 8"/><path d="M5 10v10h14V10"/><path d="M16 7V3.5h2.5V9"/>'),
+  ship: s('<circle cx="12" cy="5" r="2"/><path d="M12 7v13M7 11h10"/><path d="M4 14a8 6 0 0 0 16 0"/>'),
+  fair: s('<circle cx="12" cy="10" r="7"/><path d="M12 3v14M5 10h14M7 5l10 10M17 5 7 15"/><path d="M8 21l4-4 4 4"/>'),
+  glacier: s('<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/><path d="M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/>'),
+  volcano: s('<path d="M3 20h18l-6-10h-6z"/><path d="M10 10c-1-2 0-3 1-4M14 10c1-2 0-3-1-4M12 6V3"/>'),
+  beach: s('<path d="M12 21c0-5 1-9 3-12"/><path d="M15 9c-2-3-6-3-8-1 3 0 5 0 8 1zM15 9c2-3 6-3 7-1-3 0-5 0-7 1zM15 9c0-3 2-5 5-5-1 2-3 4-5 5z"/><path d="M3 21h18"/>'),
+  temple: s('<path d="M3 20h18L12 4z"/><path d="M8.5 13.5h7M7 16.5h10"/>'),
+  castle: s('<path d="M4 21V8h3v2h3V8h4v2h3V8h3v13z"/><path d="M10 21v-5a2 2 0 0 1 4 0v5"/>'),
+  neon: s('<path d="M13 2 5 13.5h6L10 22l9-12.5h-6z"/>'),
+  canyon: s('<path d="M12 21V5a2 2 0 0 1 4 0v8"/><path d="M12 14H9a2 2 0 0 1-2-2V9"/><path d="M16 11h1.5a1.5 1.5 0 0 0 1.5-1.5V8M4 21h16"/>'),
+  moon: s('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/><circle cx="16" cy="6" r="1" fill="currentColor"/>'),
+};

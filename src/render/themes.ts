@@ -171,6 +171,13 @@ export const THEMES: Record<ThemeId, Theme> = {
     props: [0x3a3236, 0x2e282c, 0xff6a1a, 0xffa040, 0x4a4044],
     night: true,
   },
+  // (the six new courses get their own look in delivery 2)
+  beach: { ...DAY },
+  temple: { ...DAY },
+  castle: { ...DAY },
+  neon: { ...DAY },
+  canyon: { ...DAY },
+  moon: { ...DAY },
 };
 
 /** Night version of a theme (daily modifier). */

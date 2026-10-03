@@ -1399,3 +1399,426 @@ table.card {
 .fl.warn {
   color: var(--amber);
 }
+  .maxed {
+    min-width: 0;
+  }
+}
+/* the world tour */
+.route-screen {
+  justify-content: flex-start;
+  padding: 0;
+  background: radial-gradient(ellipse at 50% 30%, #2f5a32 0%, #1c3a20 60%, #10240f 100%);
+}
+.route-head {
+  flex: none;
+  width: 100%;
+  padding: calc(14px + var(--safe-t)) 18px 10px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(12, 28, 12, 0.95), rgba(12, 28, 12, 0));
+  position: relative;
+  z-index: 2;
+}
+.route-head h2 {
+  font-size: 28px;
+}
+.route-head .eyebrow svg {
+  width: 18px;
+  height: 18px;
+  vertical-align: -3px;
+}
+.route-scroll {
+  flex: 1;
+  width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+.route {
+  position: relative;
+  width: min(460px, 100%);
+  margin: 0 auto;
+}
+.route svg.trail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.route svg.trail path {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 10px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 2 16;
+  vector-effect: non-scaling-stroke;
+}
+.route svg.trail path.done {
+  stroke: var(--amber);
+  stroke-dasharray: none;
+  stroke-width: 7px;
+  opacity: 0.85;
+}
+.rnode {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: var(--c);
+  color: #fff;
+  font-family: var(--display);
+  font-size: 20px;
+  box-shadow: 0 0 0 4px #0e1f12, 0 6px 0 4px rgba(0, 0, 0, 0.35), inset 0 -6px 0 rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  z-index: 1;
+}
+.rnode b {
+  font-weight: 400;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+.rnode:active {
+  transform: translateY(2px);
+}
+.rnode.big {
+  width: 76px;
+  height: 76px;
+  margin: -38px 0 0 -38px;
+  box-shadow: 0 0 0 4px #0e1f12, 0 0 0 9px var(--amber), 0 8px 0 8px rgba(0, 0, 0, 0.35), inset 0 -8px 0 rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-size: 22px;
+}
+.rnode.big svg {
+  width: 28px;
+  height: 28px;
+  margin-top: 4px;
+}
+.rnode.locked {
+  background: #34503a;
+  color: #86a08a;
+  box-shadow: 0 0 0 4px #0e1f12, 0 5px 0 4px rgba(0, 0, 0, 0.3);
+}
+.rnode.locked svg {
+  width: 22px;
+  height: 22px;
+}
+.rnode.locked.big {
+  box-shadow: 0 0 0 4px #0e1f12, 0 0 0 9px #4a624e, 0 8px 0 8px rgba(0, 0, 0, 0.3);
+}
+.rnode.next {
+  animation: nodepulse 1s ease-in-out infinite alternate;
+}
+.rnode.next::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  border: 3px solid var(--amber);
+  animation: ring 1.4s ease-out infinite;
+}
+@keyframes nodepulse {
+  to {
+    transform: scale(1.1);
+  }
+}
+@keyframes ring {
+  from {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+.rstars {
+  position: absolute;
+  bottom: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 14px;
+  letter-spacing: -1px;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 #000;
+}
+.rbig {
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--ui);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+}
+.stamp {
+  position: absolute;
+  transform: translate(-50%, -50%) rotate(var(--rot));
+  padding: 6px 12px 7px;
+  border: 3px dashed var(--c);
+  border-radius: 12px;
+  color: var(--c);
+  background: rgba(255, 248, 238, 0.96);
+  text-align: center;
+  line-height: 1.05;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  min-width: min(104px, var(--mw, 104px));
+  max-width: min(150px, var(--mw, 150px));
+  filter: saturate(1.2) brightness(0.8);
+}
+.stamp .st-ic svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+  margin: -2px auto 2px;
+}
+.stamp b {
+  display: block;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1.1;
+}
+.stamp small {
+  display: block;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #3a4a50;
+}
+.stamp.locked {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+.route-more {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-weight: 800;
+  color: #cfdcc4;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.route-foot {
+  flex: none;
+  width: min(460px, 100%);
+  padding: 10px 16px calc(12px + var(--safe-b));
+  display: flex;
+  gap: 10px;
+  background: linear-gradient(0deg, rgba(12, 28, 12, 0.95), rgba(12, 28, 12, 0));
+}
+.route-foot .btn {
+  flex: 1;
+  min-width: 0;
+}
+.album-btn small {
+  font-size: 0.7em;
+  opacity: 0.85;
+}
+.album-btn svg {
+  width: 26px;
+  height: 26px;
+}
+/* level card: region stamp, news, helpers */
+.panel.intro.champ {
+.panel.intro.champ {
+  box-shadow: 0 0 0 3px #0e1f12, 0 0 0 7px var(--amber), 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.region-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: #fff8ee;
+  color: var(--ink);
+  border: 3px dashed var(--c);
+  transform: rotate(-1deg);
+}
+.region-card .rc-ic svg {
+  width: 40px;
+  height: 40px;
+}
+.region-card small {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #5a6a5a;
+}
+.region-card b {
+  display: block;
+  font-size: 17px;
+  line-height: 1.15;
+}
+.champ-card {
+  background: linear-gradient(135deg, #ffe08a, var(--amber));
+  border-style: solid;
+  border-color: #c98f0a;
+}
+.news {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: rgba(255, 196, 61, 0.14);
+  box-shadow: inset 0 0 0 2px rgba(255, 196, 61, 0.4);
+}
+.news .nw-ic {
+  grid-row: 1 / 3;
+}
+.news .nw-ic svg {
+  width: 32px;
+  height: 32px;
+}
+.news small {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.news b {
+  font-size: 17px;
+}
+.helpers {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hp-tg {
+  flex: 1 1 140px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: var(--navy-2);
+  font-size: 15px;
+  opacity: 0.65;
+}
+.hp-tg.on {
+
+/* ---------- Wild Putt v2: the tour ---------- */
+.holecard i {
+  margin-top: 10px;
+  max-width: min(86vw, 420px);
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: rgba(11, 26, 31, 0.78);
+  font-style: normal;
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1.25;
+  color: #fff;
+  text-shadow: none;
+}
+.end-title.fit1 {
+  font-size: clamp(30px, 8vw, 44px);
+}
+.end-title.fit2 {
+  font-size: clamp(24px, 6.5vw, 36px);
+}
+.trophy-won {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 4px auto 0;
+  padding: 8px 16px;
+  border-radius: 14px;
+  border: 3px solid var(--c);
+  background: rgba(255, 196, 61, 0.14);
+  animation: cardin2 0.6s 1.4s both cubic-bezier(0.2, 0.9, 0.3, 1.4);
+}
+.trophy-won span {
+  font-size: 34px;
+}
+.trophy-won b {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 20px;
+  color: var(--amber);
+}
+@keyframes cardin2 {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+/* first hole: a ring round the ball and an arrow that shows the pull */
+.guide-ring,
+.guide-arrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+.guide-ring::before {
+  content: '';
+  position: absolute;
+  left: -34px;
+  top: -34px;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  border: 4px solid var(--amber);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.25);
+  animation: gring 1.2s ease-out infinite;
+}
+@keyframes gring {
+  from {
+    transform: scale(0.7);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+.guide-arrow {
+  transform-origin: 0 0;
+}
+.guide-arrow i {
+  position: absolute;
+  left: 30px;
+  top: -9px;
+  width: 92px;
+  height: 18px;
+  background: linear-gradient(90deg, rgba(255, 196, 61, 0), var(--amber) 40%);
+  clip-path: polygon(0 35%, 74% 35%, 74% 0, 100% 50%, 74% 100%, 74% 65%, 0 65%);
+  animation: garrow 1.2s ease-in-out infinite;
+}
+@keyframes garrow {
+  0% {
+    transform: translateX(-10px);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(26px);
+    opacity: 0;
+  }
+}
