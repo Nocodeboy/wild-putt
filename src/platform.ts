@@ -1,13 +1,17 @@
 // Portal integrations. Only the CrazyGames build loads their SDK; every call is a no-op elsewhere.
 
 declare const __TARGET__: string;
+declare const __CG_ADS__: boolean;
 const TARGET = typeof __TARGET__ !== 'undefined' ? __TARGET__ : 'web';
+/** Ads only from Full Launch on (CG_ADS=1 at build time): in Basic Launch CrazyGames serves none. */
+const CG_ADS = typeof __CG_ADS__ !== 'undefined' ? __CG_ADS__ : false;
 
 interface CGSDK {
   init: () => Promise<void>;
   environment: 'local' | 'crazygames' | 'disabled';
   game: { loadingStart: () => void; loadingStop: () => void; gameplayStart: () => void; gameplayStop: () => void; happytime: () => void };
   data?: { getItem: (k: string) => string | null; setItem: (k: string, v: string) => void };
+  ad?: { requestAd: (type: 'midgame' | 'rewarded', cb: { adStarted?: () => void; adFinished?: () => void; adError?: (e: unknown) => void }) => void };
 }
 
 let sdk: CGSDK | null = null;
@@ -67,10 +71,15 @@ export function happytime() {
 }
 
 export const isCrazyGames = TARGET === 'crazygames';
+
+/** CrazyGames video ads can be requested (CG_ADS build, SDK ready, ad module present). The web build has none. */
+export function adsAvailable(): boolean {
+  return CG_ADS && !!sdk && sdk.environment !== 'disabled' && !!sdk.ad;
+}
 export const isAndroid = TARGET === 'android';
 
 interface CapApp {
-  addListener: (ev: 'backButton', cb: () => void) => unknown;
+  addListener: (ev: 'backButton' | 'resume', cb: () => void) => unknown;
   exitApp: () => Promise<void>;
 }
 function capApp(): CapApp | null {
@@ -92,4 +101,14 @@ export function exitApp() {
   capApp()
     ?.exitApp()
     .catch(() => undefined);
+}
+
+/** The app comes back to the foreground (Android): look for purchases paid meanwhile. A no-op elsewhere. */
+export function onAppResume(handler: () => void) {
+  if (!isAndroid) return;
+  try {
+    capApp()?.addListener('resume', handler);
+  } catch {
+    /* not running inside the app */
+  }
 }

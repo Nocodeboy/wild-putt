@@ -1,4 +1,4 @@
-import { fmtPar, gameName, getLang, scoreName, t, tx } from '../i18n';
+import { fmtPar, gameName, getLang, num, scoreName, t, tx } from '../i18n';
 import type { EdgeMark, Label } from '../render/view';
 import type { Stage } from '../render/stage';
 import { hexStr, THEMES } from '../render/themes';
@@ -25,8 +25,101 @@ function starsTxt(n: number, max = 3): string {
   return o;
 }
 
+/** Coins balance; a tap opens the shop. */
+export function walletHtml(coins: number, id = '') {
+  return `<button class="wallet" data-a="shop" aria-label="${t('shop')}">${IC.coin}<b${id ? ` id="${id}"` : ''}>${num(coins)}</b><span class="plus">+</span></button>`;
+}
+
+/** Label of a button that plays an ad: always says so. */
+export function adLabel(action: string): string {
+  return `<span class="adlbl"><small>${esc(t('adWord'))}</small>${esc(action)}</span>`;
+}
+
+/** Animated number (coins). */
+export function countUp(node: HTMLElement, from: number, to: number, ms: number, prefix = '', tick?: () => void) {
+  const t0 = performance.now();
+  let last = from;
+  const step = (now: number) => {
+    const k = Math.min(1, (now - t0) / ms);
+    const v = Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3)));
+    node.textContent = prefix + num(v);
+    if (tick && v !== last && Math.floor(v / 10) !== Math.floor(last / 10)) tick();
+    last = v;
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 // ---------------- screens ----------------
 const screens = () => $('#screens');
+
+/** A screen on top of the current one (offers, cards). */
+export function overlay(node: HTMLElement) {
+  screens().appendChild(node);
+  node.querySelector<HTMLElement>('[data-focus]')?.focus({ preventScroll: true });
+}
+
+/** The studio's other games: a card each, opening its web (or its Play listing in the app) in a new tab. */
+export function moreGamesScreen(o: { games: { id: string; name: string; tag: string; href: string; color: string; color2: string; icon: string }[]; onOpen: (id: string) => void; onBack: () => void }) {
+  const cards = o.games
+    .map(
+      (g) => `<a class="game-card" href="${esc(g.href)}" target="_blank" rel="noopener" data-g="${esc(g.id)}" style="--c:${g.color};--c2:${g.color2}">
+        <span class="gc-tile">${g.icon}</span>
+        <span class="gc-info"><b>${esc(g.name)}</b><small>${esc(g.tag)}</small></span>
+        <span class="gc-go">${t('playFree')}${IC.ext}</span>
+      </a>`,
+    )
+    .join('');
+  const n = el(`
+  <div class="screen dim more-screen">
+    <div class="panel">
+      <div class="tape"></div>
+      <div class="panel-head"><div class="eyebrow">${esc(t('studio'))}</div><h2 class="${fit(t('moreGames'), 10)}">${t('moreGames')}</h2></div>
+      <div class="panel-body">
+        <p class="muted">${t('moreGamesSub')}</p>
+        ${cards}
+        <div class="actions"><button class="btn ghost" data-a="back" data-focus>${IC.back}${t('back')}</button></div>
+      </div>
+    </div>
+  </div>`);
+  n.querySelectorAll<HTMLElement>('[data-g]').forEach((a) => a.addEventListener('click', () => o.onOpen(a.dataset.g!)));
+  n.querySelector('[data-a=back]')!.addEventListener('click', o.onBack);
+  show(n);
+}
+
+/** Mulligan: take the last putt again, for an ad or for coins (once per hole). */
+export function mulliganScreen(o: { ad: boolean; cost: number; balance: number; onAd: () => void; onCoins: () => void; onNo: () => void }) {
+  const poor = o.balance < o.cost;
+  const n = el(`
+  <div class="screen dim mull-screen">
+    <div class="panel">
+      <div class="tape"></div>
+      <div class="panel-head" style="text-align:center"><div class="eyebrow">${t('mulligan')}</div></div>
+      <div class="panel-body">
+        <h2 class="end-title win fit1">${t('mullTitle')}</h2>
+        <div class="tip">${IC.retry.replace('<svg', '<svg style="width:26px;height:26px;flex:none;color:#ffb21f"')}<p>${t('mullTip')}</p></div>
+        ${o.ad ? `<button class="btn big amber ui-font" data-a="ad" data-focus>${IC.ad}${adLabel(t('mullAd'))}</button>` : ''}
+        <button class="btn ${o.ad ? 'water' : 'big amber'} ui-font${poor ? ' poor' : ''}" data-a="coins"${o.ad ? '' : ' data-focus'}>${t('mullAd')}<span class="price">${IC.coin}${num(o.cost)}</span></button>
+        <button class="btn ghost" data-a="no">${t('mullNo')}</button>
+      </div>
+    </div>
+  </div>`);
+  const btns = n.querySelectorAll<HTMLButtonElement>('button');
+  n.querySelector('[data-a=ad]')?.addEventListener('click', () => {
+    btns.forEach((b) => (b.disabled = true));
+    o.onAd();
+  });
+  n.querySelector('[data-a=coins]')!.addEventListener('click', () => {
+    if (poor) {
+      toast(t('notEnough'), 'warn');
+      return;
+    }
+    btns.forEach((b) => (b.disabled = true));
+    o.onCoins();
+  });
+  n.querySelector('[data-a=no]')!.addEventListener('click', o.onNo);
+  overlay(n);
+}
 
 export function clearScreens() {
   screens().innerHTML = '';
@@ -44,6 +137,13 @@ function hex(n: number) {
 }
 
 export interface TitleOpts {
+  coins: number;
+  trophies: number;
+  maxTrophies: number;
+  onShop: () => void;
+  onCabinet: () => void;
+  /** "More games" (the studio's other games); absent on CrazyGames */
+  onMore?: () => void;
   playLabel: string;
   playLevel: number | null;
   stars: number;
@@ -62,6 +162,7 @@ export function titleScreen(o: TitleOpts) {
   const es = getLang() === 'es';
   const n = el(`
   <div class="screen title-screen">
+    ${walletHtml(o.coins)}
     <div class="logo">
       <h1>${es ? '<span class="ex">¡</span>EMBÓCALA<span class="ex">!</span>' : 'WILD<br>PUTT'}</h1>
       <div class="duo">${IC.ball}${IC.hole}</div>
@@ -74,7 +175,13 @@ export function titleScreen(o: TitleOpts) {
         <button class="btn ghost" data-a="levels">${IC.route}${t('routeBtn')}</button>
         <button class="btn amber daily-btn" data-a="daily">${IC.cal}#${o.dailyNum}${o.streak > 0 ? `<span class="badge">🔥 ${o.streak}</span>` : o.dailyDone ? `<span class="badge">✓</span>` : ''}</button>
       </div>
-      <div class="foot"><button class="icon-btn" data-a="settings" aria-label="${t('settings')}">${IC.gear}</button><span class="starcount"><span class="star-on">★</span> ${o.stars}/${o.maxStars}</span><span>${t('credits')}</span></div>
+      <div class="foot">
+        <button class="icon-btn" data-a="settings" aria-label="${t('settings')}">${IC.gear}</button>
+        <span class="starcount"><span class="star-on">★</span> ${o.stars}/${o.maxStars}</span>
+        <button class="starcount rs-count" data-a="cabinet" aria-label="${t('cabinet')}">${IC.trophy} ${o.trophies}/${o.maxTrophies}</button>
+        <button class="icon-btn" data-a="shopbtn" aria-label="${t('shop')}">${IC.shop}</button>
+      </div>
+      <div class="credits-row"><span class="credits">${t('credits')}</span>${o.onMore ? `<button class="more-games" data-a="more">${IC.games}${t('moreGames')}</button>` : ''}</div>
       ${o.privacyUrl ? `<p class="privacy-note">${t('privacyNote')} <a href="${o.privacyUrl}" target="_blank" rel="noopener">${t('privacyPolicy')}</a></p>` : ''}
     </div>
   </div>`);
@@ -82,6 +189,10 @@ export function titleScreen(o: TitleOpts) {
   n.querySelector('[data-a=levels]')!.addEventListener('click', o.onLevels);
   n.querySelector('[data-a=daily]')!.addEventListener('click', o.onDaily);
   n.querySelector('[data-a=settings]')!.addEventListener('click', o.onSettings);
+  n.querySelector('[data-a=shop]')!.addEventListener('click', o.onShop);
+  n.querySelector('[data-a=shopbtn]')!.addEventListener('click', o.onShop);
+  n.querySelector('[data-a=cabinet]')!.addEventListener('click', o.onCabinet);
+  n.querySelector('[data-a=more]')?.addEventListener('click', () => o.onMore?.());
   show(n);
 }
 
@@ -216,8 +327,15 @@ export interface HoleEndOpts {
   best: number;
   newBest: boolean;
   hasNext: boolean;
-  /** extra blocks (coins, trophy, ads) */
+  /** extra blocks (trophy) */
   extraHtml?: string;
+  coins: number;
+  balance: number;
+  canDouble: boolean;
+  onDouble: () => Promise<{ coins: number; balance: number } | null>;
+  onShop: () => void;
+  onTrophy?: () => void;
+  onCoin?: () => void;
   onNext: () => void;
   onRetry: () => void;
   onMenu: () => void;
@@ -237,6 +355,11 @@ export function holeEndScreen(o: HoleEndOpts): HTMLElement {
         <div class="bigscore"><b>${o.strokes}</b><span>${t('par')} ${o.par} · ${fmtPar(o.strokes - o.par)}</span></div>
         ${o.newBest ? `<div class="newbest">${t('newBest')}</div>` : o.best > 0 && o.best < o.strokes ? `<div class="muted" style="text-align:center">${t('best')}: ${o.best}</div>` : ''}
         ${o.extraHtml ?? ''}
+        <div class="coinbox">
+          <div class="earn" aria-label="${t('coins')}">${IC.coin}<b id="end-coins">+0</b></div>
+          ${o.canDouble ? `<button class="btn amber sm" data-a="double" aria-label="${t('doubleAria')}">${IC.ad}${adLabel(t('double'))}</button>` : ''}
+          ${walletHtml(o.balance - o.coins, 'end-balance')}
+        </div>
         <div class="actions">
           ${o.hasNext ? `<button class="btn big" data-a="next" data-focus style="flex:1 1 100%">${t('nextHole')}${IC.next}</button>` : `<button class="btn big" data-a="route" data-focus style="flex:1 1 100%">${IC.route}${t('route')}</button>`}
         </div>
@@ -252,6 +375,24 @@ export function holeEndScreen(o: HoleEndOpts): HTMLElement {
   n.querySelectorAll('[data-a=route]').forEach((b) => b.addEventListener('click', o.onRoute));
   n.querySelector('[data-a=retry]')!.addEventListener('click', o.onRetry);
   n.querySelector('[data-a=menu]')!.addEventListener('click', o.onMenu);
+  n.querySelector('[data-a=shop]')!.addEventListener('click', o.onShop);
+  n.querySelector('[data-a=trophy]')?.addEventListener('click', () => o.onTrophy?.());
+  const earned = n.querySelector<HTMLElement>('#end-coins')!;
+  const balance = n.querySelector<HTMLElement>('#end-balance')!;
+  const dbl = n.querySelector<HTMLButtonElement>('[data-a=double]');
+  let doubled = false;
+  dbl?.addEventListener('click', async () => {
+    dbl.disabled = true;
+    const res = await o.onDouble();
+    if (!res) {
+      dbl.disabled = false;
+      return;
+    }
+    doubled = true;
+    dbl.remove();
+    countUp(earned, o.coins, res.coins, 700, '+', o.onCoin);
+    countUp(balance, res.balance - res.coins + o.coins, res.balance, 700);
+  });
   show(n);
   const stars = n.querySelectorAll<HTMLElement>('.bigstars span');
   stars.forEach((st, i) => {
@@ -263,6 +404,11 @@ export function holeEndScreen(o: HoleEndOpts): HTMLElement {
       }
     }, 350 + i * 380);
   });
+  setTimeout(() => {
+    if (doubled) return;
+    countUp(earned, 0, o.coins, 700, '+', o.onCoin);
+    countUp(balance, o.balance - o.coins, o.balance, 700);
+  }, 350 + 3 * 380);
   return n;
 }
 
@@ -617,7 +763,7 @@ export function updateIcons(stage: Stage, labels: Label[], edges: EdgeMark[]) {
 }
 
 // ---------------- HUD ----------------
-export function buildHud(onPause: () => void, onCamera: () => void = () => undefined) {
+export function buildHud(onPause: () => void, onCamera: () => void = () => undefined, onMulligan: () => void = () => undefined) {
   const hud = $('#hud');
   hud.innerHTML = `
     <div class="hud-row">
@@ -627,6 +773,7 @@ export function buildHud(onPause: () => void, onCamera: () => void = () => undef
     </div>
     <div class="hud-row hud-right">
       <button class="icon-btn" id="hud-cam" aria-label="${t('camera')}" title="${t('camera')}">${IC.cam}</button>
+      <button class="mull-btn" id="hud-mull" hidden>${IC.retry}<span>${t('mulligan')}</span></button>
     </div>
     <div class="hud-row">
       <div class="chip strokechip" id="hud-strokes">${IC.putter}<span></span></div>
@@ -634,6 +781,7 @@ export function buildHud(onPause: () => void, onCamera: () => void = () => undef
     </div>`;
   $('#hud-pause').addEventListener('click', onPause);
   $('#hud-cam').addEventListener('click', onCamera);
+  $('#hud-mull').addEventListener('click', onMulligan);
 }
 
 export interface HudState {

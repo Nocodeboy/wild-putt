@@ -46,7 +46,7 @@ export function installId(): string {
   return install;
 }
 
-/** Device language and time zone (approximate country for the studio's `paises` / `regiones` views, no location). */
+/** Device language and time zone: tell tier-1 players apart (approximate region) without personal data. */
 export function localeProps(): Props {
   let tz = '';
   try {
@@ -55,6 +55,27 @@ export function localeProps(): Props {
     /* old browsers */
   }
   return { loc: navigator.language || '', tz };
+}
+
+/** Where the player came from: the utm_* tags of our links (videos, posts) and the site that sent them (domain only).
+ *  Sent in first_open (first touch) and in session_start (each visit); empty in the Android app and on direct visits. */
+export function sourceProps(): Props {
+  const p: Props = {};
+  try {
+    const q = new URLSearchParams(location.search);
+    const tags = [['utm_source', 'src'], ['utm_medium', 'med'], ['utm_campaign', 'cmp'], ['utm_content', 'cnt']] as const;
+    for (const [k, n] of tags) {
+      const v = q.get(k);
+      if (v) p[n] = v.slice(0, 48);
+    }
+    if (document.referrer) {
+      const h = new URL(document.referrer).hostname;
+      if (h && h !== location.hostname) p.ref = h.slice(0, 64);
+    }
+  } catch {
+    /* old browsers or a malformed referrer */
+  }
+  return p;
 }
 
 export function initAnalytics() {

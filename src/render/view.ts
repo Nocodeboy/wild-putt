@@ -195,6 +195,11 @@ export class LevelView {
   private time = 0;
   private m4 = new THREE.Matrix4();
   aim: Aim | null = null;
+  /** the aim-line upgrade from the shop: length factor and bounces shown */
+  aimLen = 1;
+  aimBounces = 1;
+  private trailRGB: [number, number, number] = [1, 1, 1];
+  private comet = false;
   /** yaw of the camera (the resting putter faces the way the camera looks) */
   camYaw = -PI / 2;
   labels: Label[] = [];
@@ -543,6 +548,85 @@ export class LevelView {
         this.coinMeshes.push(m);
       }
     }
+  }
+
+  /** The ball from the shop: colours, a painted pattern, its trail. */
+  setBall(c1: number, c2: number | undefined, pattern: string | undefined, trail: [number, number, number]) {
+    const mat = this.ball.material as THREE.MeshStandardMaterial;
+    this.trailRGB = trail;
+    this.comet = pattern === 'comet';
+    mat.map?.dispose();
+    mat.map = null;
+    mat.color.setHex(pattern ? 0xffffff : c1);
+    mat.metalness = pattern === 'disco' ? 0.7 : 0;
+    mat.roughness = pattern === 'disco' ? 0.2 : 0.32;
+    mat.emissive.setHex(this.comet ? 0x1a4a8a : 0x000000);
+    if (pattern) {
+      const cv = document.createElement('canvas');
+      cv.width = 256;
+      cv.height = 128;
+      const g = cv.getContext('2d')!;
+      const h1 = '#' + c1.toString(16).padStart(6, '0');
+      const h2 = '#' + (c2 ?? c1).toString(16).padStart(6, '0');
+      g.fillStyle = h1;
+      g.fillRect(0, 0, 256, 128);
+      g.fillStyle = h2;
+      g.strokeStyle = h2;
+      switch (pattern) {
+        case 'stripe':
+          g.fillRect(0, 44, 256, 40);
+          break;
+        case 'tennis':
+          g.lineWidth = 7;
+          g.beginPath();
+          for (let x = 0; x <= 256; x += 4) g.lineTo(x, 64 + Math.sin((x / 256) * PI * 4) * 34);
+          g.stroke();
+          break;
+        case 'soccer':
+          for (let k = 0; k < 12; k++) {
+            const x = (k % 6) * 43 + (k < 6 ? 0 : 21);
+            const y = k < 6 ? 36 : 92;
+            g.beginPath();
+            for (let j = 0; j < 5; j++) g.lineTo(x + 12 * Math.cos((j * 2 * PI) / 5), y + 12 * Math.sin((j * 2 * PI) / 5));
+            g.fill();
+          }
+          break;
+        case 'pool':
+          g.beginPath();
+          g.arc(64, 64, 26, 0, PI * 2);
+          g.fill();
+          g.fillStyle = '#141414';
+          g.font = 'bold 34px Arial';
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.fillText('8', 64, 66);
+          break;
+        case 'melon':
+          for (let x = 0; x < 256; x += 32) g.fillRect(x, 0, 12, 128);
+          break;
+        case 'disco':
+          for (let x = 0; x < 256; x += 16) for (let y = 0; y < 128; y += 16) {
+            g.fillStyle = (x + y) % 32 ? h2 : '#ffffff';
+            g.fillRect(x + 1, y + 1, 14, 14);
+          }
+          break;
+        case 'planet':
+          for (let y = 10; y < 128; y += 22) g.fillRect(0, y, 256, 9);
+          break;
+        case 'comet':
+          g.globalAlpha = 0.6;
+          for (let k = 0; k < 14; k++) {
+            g.beginPath();
+            g.arc((k * 53) % 256, (k * 37) % 128, 6 + (k % 3) * 4, 0, PI * 2);
+            g.fill();
+          }
+          break;
+      }
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      mat.map = tex;
+    }
+    mat.needsUpdate = true;
   }
 
   setTier(t: 'high' | 'medium' | 'low') {
@@ -1522,12 +1606,13 @@ export class LevelView {
     this.ball.visible = b.y > -1.2;
     this.ballShadow.position.set(this.shown.x + 0.04, 0.004, this.shown.z + 0.05);
     this.ballShadow.visible = b.y > -0.05 && !inCup;
-    // trail when it flies
-    if (sp > 6 && this.tier !== 'low') {
+    // trail when it flies (the ball's own colour; the comet always burns)
+    if ((sp > 6 || (this.comet && sp > 1.5)) && this.tier !== 'low') {
       this.trailT += dt * sp;
+      const [r, g, bl] = this.trailRGB;
       while (this.trailT > 0.45) {
         this.trailT -= 0.45;
-        this.sparks.add({ x: b.x, y: BALL_R, z: b.z, life: 0.35, s0: 0.17, s1: 0.02, r: 1, g: 1, b: 1, a: 0.55 });
+        this.sparks.add({ x: b.x, y: BALL_R + b.y, z: b.z, life: this.comet ? 0.5 : 0.35, s0: this.comet ? 0.24 : 0.17, s1: 0.02, r, g, b: bl, a: 0.6 });
       }
     }
     // ---- flag: waves in the wind, pops up (with a spin) when the ball drops ----
@@ -1683,7 +1768,7 @@ export class LevelView {
     rm.opacity = 0.9;
     rm.color.copy(col);
     this.ring.scale.setScalar(1 + p * 0.7);
-    const pts = s.previewPath(a.angle, p, 2.5 + p * 7.5);
+    const pts = s.previewPath(a.angle, p, (2.5 + p * 7.5) * this.aimLen, this.aimBounces);
     const n = this.dots.length;
     let total = 0;
     const seg: number[] = [0];

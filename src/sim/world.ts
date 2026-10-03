@@ -713,9 +713,39 @@ export class Sim {
   }
 
   // ---------- the real ball ----------
+  /** Where things stood before the last putt (for the mulligan). */
+  private snap: { x: number; z: number; strokes: number; lavaLevel: number; ground: Uint8Array | null; lastRest: { x: number; z: number }; coins: number[] } | null = null;
+
+  /** The last putt can be taken again (the ball has settled and the hole is not over). */
+  canMulligan(): boolean {
+    return !!this.snap && this.state === 'aim' && this.strokes > 0;
+  }
+  /** Mulligan: back to before the last putt (ball, strokes, lava and coins); the hole's clock runs on. */
+  mulligan(): boolean {
+    const p = this.snap;
+    if (!p || !this.canMulligan()) return false;
+    const b = this.ball;
+    b.x = p.x;
+    b.z = p.z;
+    b.vx = b.vz = 0;
+    b.y = 0;
+    b.air = 0;
+    b.lock = undefined;
+    b.state = 'rest';
+    this.strokes = p.strokes;
+    this.lavaLevel = p.lavaLevel;
+    if (p.ground) this.ground.set(p.ground);
+    this.lastRest = { ...p.lastRest };
+    this.coinsGot = [...p.coins];
+    this.snap = null;
+    this.events.push({ type: 'rest', x: b.x, z: b.z });
+    return true;
+  }
+
   /** Putt the ball. angle: direction of travel (0 = +x, π/2 = +z); power 0..1. */
   shoot(angle: number, power: number) {
     if (this.state !== 'aim') return;
+    this.snap = { x: this.ball.x, z: this.ball.z, strokes: this.strokes, lavaLevel: this.lavaLevel, ground: this.lavaDist ? this.ground.slice() : null, lastRest: { ...this.lastRest }, coins: [...this.coinsGot] };
     const p = Math.max(0.04, Math.min(1, power));
     const v = VMAX * p;
     this.ball.vx = Math.cos(angle) * v;
@@ -993,7 +1023,7 @@ export class Sim {
   }
 
   /** The first stretch of a putt until its first bounce (the aim line shows only this much). */
-  previewPath(angle: number, power: number, maxLen: number): { x: number; z: number }[] {
+  previewPath(angle: number, power: number, maxLen: number, maxBounces = 1): { x: number; z: number }[] {
     const v = VMAX * Math.max(0.04, Math.min(1, power));
     const b: Ball = { x: this.ball.x, z: this.ball.z, vx: Math.cos(angle) * v, vz: Math.sin(angle) * v, y: 0, state: 'roll' };
     const pts = [{ x: b.x, z: b.z }];
@@ -1013,8 +1043,8 @@ export class Sim {
       // stop the line a short way after the first bounce
       if ((pvx * b.vx + pvz * b.vz) < 0.6 * Math.hypot(pvx, pvz) * Math.hypot(b.vx, b.vz)) {
         bounces++;
-        if (bounces > 1) break;
-        maxLen = Math.min(maxLen, len + 1.6);
+        if (bounces > maxBounces) break;
+        if (bounces === maxBounces) maxLen = Math.min(maxLen, len + 1.6);
       }
     }
     return pts;

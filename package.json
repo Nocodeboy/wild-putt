@@ -22,11 +22,13 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@capacitor-community/admob": "^8.1.0",
     "@capacitor/android": "^8.5.2",
     "@capacitor/app": "^8.1.1",
     "@capacitor/cli": "^8.5.2",
     "@capacitor/core": "^8.5.2",
     "@capacitor/share": "^8.0.2",
+    "@capgo/native-purchases": "^8.8.1",
     "@fontsource/baloo-2": "^5.3.0",
     "@fontsource/bungee": "^5.3.0",
     "@types/node": "^26.6.2",

@@ -1,7 +1,14 @@
-import { initAnalytics, localeProps, setAnalyticsEnabled, submitDaily, track } from './analytics';
-import { cloudStore, exitApp, gameplayStart, gameplayStop, happytime, loadingDone, onAndroidBack, platformInit } from './platform';
+import { initAnalytics, localeProps, setAnalyticsEnabled, sourceProps, submitDaily, track } from './analytics';
+import { cloudStore, exitApp, gameplayStart, gameplayStop, happytime, isAndroid, loadingDone, onAndroidBack, platformInit } from './platform';
 import { audio, vibrate } from './audio';
-import { detectLang, fmtPar, gameName, getLang, scoreName, setLang, t, tx } from './i18n';
+import { gameLink, MORE_GAMES } from './crosspromo';
+import { AIM_LEN, ballById, buyAim, buyBall, claimFreeCoins, dailyCoins, FREE_COINS, freeCoinsLeft, holeCoins, MULLIGAN_COST, takeDailyReward } from './economy';
+import { detectLang, fmtPar, gameName, getLang, num, scoreName, setLang, t, tx } from './i18n';
+import { adBusy, buy, canReward, hasStore, initMonetize, maybeInterstitial, noteLevelEnd, restorePurchases, showRewarded, storeProducts, type Delivered } from './monetize';
+import type { ProductId } from './monetize/types';
+import { IC } from './ui/icons';
+import { shopScreen } from './ui/shop';
+import { cabinetScreen, drawTrophyCard, shareImage, trophyModal } from './ui/trophy';
 import { Input, screenToWorld, type Shot } from './input';
 import { Stage, type CamMode, type Tier } from './render/stage';
 import type { Aim } from './render/view';
@@ -29,6 +36,8 @@ import {
   introScreen,
   pauseScreen,
   resetHudCache,
+  moreGamesScreen,
+  mulliganScreen,
   routeScreen,
   settingsScreen,
   titleScreen,
@@ -62,7 +71,10 @@ const canvas = $<HTMLCanvasElement>('#c');
 const stage = new Stage(canvas);
 const input = new Input($('#touch'), $('#pad'));
 let save = store.load();
+const firstSession = save.firstOpen;
 let mode: Mode = 'attract';
+/** the mulligan of this hole attempt: unused, or used (with an ad or with coins) */
+let mullUsed = false;
 let sim: Sim | null = null;
 let bot: Bot | null = null;
 let current: Current | null = null;
@@ -116,19 +128,24 @@ platformInit().finally(() => {
   };
   requestAnimationFrame(done);
   setTimeout(done, 400);
+  // ads and the store after the portal SDK is ready
+  initMonetize({ firstSession, onPause: adPause, onDelivered: purchasesDelivered }).then(() => {
+    if (document.querySelector('#screens .title-screen')) showTitle();
+  });
 });
 if (save.firstOpen) {
-  track('first_open', { lang: getLang(), ...localeProps() });
+  track('first_open', { lang: getLang(), ...localeProps(), ...sourceProps() });
   save.firstOpen = false;
   store.save();
 }
-track('session_start', { stars: store.totalStars(), ...localeProps() });
+track('session_start', { stars: store.totalStars(), coins: save.coins, ...localeProps(), ...sourceProps() });
 document.title = getLang() === 'es' ? '¡Embócala! · Minigolf' : 'Wild Putt · Mini golf';
-buildHud(pauseGame, toggleCamera);
+buildHud(pauseGame, toggleCamera, offerMulligan);
 input.onPause = pauseGame;
 input.onCamera = toggleCamera;
 input.vibration = save.settings.vibration;
 onAndroidBack(() => {
+  if (adBusy()) return;
   if (mode === 'play') {
     pauseGame();
     return;
@@ -164,6 +181,23 @@ showTitle();
 requestAnimationFrame(frame);
 
 // ---------- helpers ----------
+/** Around every ad: silence, stop the loop and tell the portal the game is not being played. */
+function adPause(on: boolean) {
+  if (on) {
+    audio.duck(true);
+    audio.stopLoops();
+    gameplayStop();
+  } else {
+    audio.duck(false);
+    last = performance.now();
+  }
+}
+/** Purchases delivered outside a Buy tap (paid earlier, recovered at launch or on resume). */
+function purchasesDelivered(d: Delivered) {
+  if (d.coins) toast(t('bought', { n: num(d.coins) }), 'good', 3200);
+  else if (d.ids.includes('remove_ads')) toast(t('boughtNoAds'), 'good', 3200);
+  if (document.querySelector('#screens .shop-screen')) renderShop();
+}
 function lid(n: number): string {
   return `L${n}`;
 }
@@ -272,6 +306,23 @@ function showTitle() {
   const next = nextLevel();
   const any = finished(1);
   titleScreen({
+    coins: save.coins,
+    trophies: save.trophies.length,
+    maxTrophies: READY.length,
+    onShop: () => {
+      audio.play('click');
+      showShop('title');
+    },
+    onCabinet: () => {
+      audio.play('click');
+      showCabinet('title');
+    },
+    onMore: TARGET_CG
+      ? undefined
+      : () => {
+          audio.play('click');
+          showMoreGames();
+        },
     playLabel: any ? t('continue') : t('play'),
     playLevel: any ? next : null,
     stars: store.totalStars(),
@@ -333,7 +384,176 @@ function showRoute() {
     },
     onCabinet: () => {
       audio.play('click');
-      toast(`${t('cabinet')}: ${save.trophies.length}/${READY.length}`, 'good');
+      showCabinet('route');
+    },
+  });
+}
+
+function showMoreGames() {
+  track('more_games');
+  moreGamesScreen({
+    games: MORE_GAMES.map((g) => ({ id: g.id, name: tx(g.name), tag: tx(g.tag), href: gameLink(g, 'wildputt', isAndroid), color: g.color, color2: g.color2, icon: g.icon })),
+    onOpen: (id) => track('crosspromo', { game: id }),
+    onBack: () => {
+      audio.play('click');
+      showTitle();
+    },
+  });
+}
+
+// ---------- shop ----------
+let shopFrom: 'title' | 'end' | 'route' = 'title';
+function showShop(from: 'title' | 'end' | 'route') {
+  shopFrom = from;
+  track('shop_open', { from, coins: save.coins });
+  renderShop();
+}
+function renderShop() {
+  const today = dayKey();
+  shopScreen({
+    save,
+    free: canReward() ? { left: freeCoinsLeft(save, today), amount: FREE_COINS } : null,
+    products: hasStore() ? storeProducts() : null,
+    onAim: () => {
+      const cost = buyAim(save);
+      if (!cost) return;
+      store.save();
+      audio.play('star', save.aim);
+      track('upgrade', { up: 'aim', lvl: save.aim });
+      track('coins_spend', { what: 'aim', n: cost });
+      renderShop();
+    },
+    onBall: (id) => {
+      if (save.balls.includes(id)) {
+        save.ball = id;
+        store.save();
+        audio.play('click');
+      } else {
+        const cost = buyBall(save, id);
+        if (!cost) return;
+        store.save();
+        audio.play('star', 2);
+        toast(t('newBall'), 'good');
+        track('ball', { id });
+        track('coins_spend', { what: 'ball', n: cost });
+      }
+      renderShop();
+    },
+    onFree: async () => {
+      const ok = await showRewarded('free_coins');
+      if (ok) {
+        const n = claimFreeCoins(save, dayKey());
+        if (n) {
+          store.save();
+          audio.play('coin');
+          toast(`+${num(n)}`, 'good');
+          track('coins_earn', { src: 'free_coins', n });
+        }
+      } else toast(t('adFailed'), 'warn');
+      renderShop();
+    },
+    onBuy: async (id: ProductId) => {
+      const r = await buy(id);
+      if (r === 'pending') toast(t('pendingPay'), 'good', 3200);
+      else if (r === null) toast(t('buyFailed'), 'warn');
+      else if (id === 'remove_ads') toast(t('boughtNoAds'), 'good', 3200);
+      else toast(t('bought', { n: num(r) }), 'good', 3200);
+      renderShop();
+    },
+    onRestore: async () => {
+      const got = await restorePurchases();
+      toast(got.length ? t('restored') : t('nothingToRestore'), got.length ? 'good' : '');
+      renderShop();
+    },
+    onBack: () => {
+      audio.play('click');
+      if (shopFrom === 'end' && current?.kind === 'level') showRoute();
+      else if (shopFrom === 'route') showRoute();
+      else showTitle();
+    },
+  });
+}
+
+// ---------- trophies ----------
+function showCabinet(from: 'title' | 'route') {
+  cabinetScreen({
+    slots: READY.map((c) => ({ id: c.id, name: tx(c.name), trophy: tx(c.cup), color: c.color, level: champLevel(c.id), have: save.trophies.includes(c.id) })),
+    onOpen: (id) => void openTrophy(id),
+    onBack: () => {
+      audio.play('click');
+      if (from === 'route') showRoute();
+      else showTitle();
+    },
+  });
+}
+async function openTrophy(id: string, fresh = false) {
+  const c = READY.find((x) => x.id === id);
+  const info = save.trophyInfo[id];
+  if (!c || !info) return;
+  const cv = await drawTrophyCard({ course: tx(c.name), courseId: c.id, trophy: tx(c.cup), color: c.color, level: info.level, strokes: info.strokes, par: info.par, game: gameName(), url: GAME_URL });
+  trophyModal({
+    title: fresh ? t('trophyWon') : tx(c.cup),
+    canvas: cv,
+    onShare: async () => {
+      const r = await shareImage(cv, `wildputt-${id}.png`, t('trophyText', { t: tx(c.cup), g: gameName() }) + (GAME_URL ? ' ' + GAME_URL : ''), gameName());
+      if (r !== 'failed') track('share', { what: 'trophy', course: id });
+    },
+    onClose: () => undefined,
+  });
+}
+
+// ---------- mulligan ----------
+function mulliganAllowed(): boolean {
+  return !!sim && mode === 'play' && current?.kind === 'level' && current.n > 1 && !mullUsed && sim.canMulligan() && !stage.introRunning;
+}
+function updateMulliganButton() {
+  const b = document.getElementById('hud-mull');
+  if (b) b.hidden = !mulliganAllowed();
+}
+function offerMulligan() {
+  if (!mulliganAllowed() || input.dragging) return;
+  audio.play('click');
+  mode = 'paused';
+  gameplayStop();
+  input.reset();
+  const resume = () => {
+    document.querySelector('.mull-screen')?.remove();
+    mode = 'play';
+    gameplayStart();
+    last = performance.now();
+  };
+  const apply = (how: 'ad' | 'coins') => {
+    if (sim?.mulligan()) {
+      mullUsed = true;
+      for (const ev of sim.events) handleEvent(ev);
+      sim.events.length = 0;
+      track('mulligan', { ...levelProps((current as { n: number }).n), how });
+      audio.play('portal');
+    }
+    resume();
+  };
+  mulliganScreen({
+    ad: canReward(),
+    cost: MULLIGAN_COST,
+    balance: save.coins,
+    onAd: async () => {
+      const ok = await showRewarded('mulligan');
+      if (ok) apply('ad');
+      else {
+        toast(t('adFailed'), 'warn');
+        resume();
+      }
+    },
+    onCoins: () => {
+      if (save.coins < MULLIGAN_COST) return;
+      save.coins -= MULLIGAN_COST;
+      store.save();
+      track('coins_spend', { what: 'mulligan', n: MULLIGAN_COST });
+      apply('coins');
+    },
+    onNo: () => {
+      audio.play('click');
+      resume();
     },
   });
 }
@@ -369,7 +589,7 @@ function showSettings() {
       } else if (k === 'lang') {
         st.lang = v as 'es' | 'en';
         setLang(st.lang);
-        buildHud(pauseGame, toggleCamera);
+        buildHud(pauseGame, toggleCamera, offerMulligan);
         store.save();
         showSettings();
         return;
@@ -397,12 +617,25 @@ function loadHole() {
   sim = new Sim(h.def, h.mods);
   bot = null;
   stage.setLevel(sim, courseOf(h.def));
+  applyLooks(current?.kind === 'daily');
+  mullUsed = false;
   flags.sway = false;
   flags.lastStroke = false;
   clearFloaters();
   input.reset();
   input.resetAim();
   stage.mode = camMode();
+}
+
+/** The player's ball and aim line on the hole on screen (the daily round always has the plain aim line). */
+function applyLooks(daily: boolean) {
+  const v = stage.view;
+  if (!v) return;
+  const b = ballById(save.ball);
+  v.setBall(b.c1, b.c2, b.pattern, b.trail);
+  const lvl = daily ? 0 : save.aim;
+  v.aimLen = AIM_LEN[lvl];
+  v.aimBounces = lvl >= 3 ? 2 : 1;
 }
 
 /** A hole of the tour: its card, or straight onto the green for the first two holes (one click to play). */
@@ -749,24 +982,37 @@ function holeDone() {
     save.trophyInfo[c.id] = { level: n, strokes: res.strokes, par: res.par, at: Date.now() };
     track('trophy', { course: c.id, level: id, strokes: res.strokes, par: res.par });
   }
+  const picked = s.coinsGot.length;
+  const coins = holeCoins(st, res.strokes, picked, L.champ);
+  save.coins += coins;
+  noteLevelEnd();
   store.save();
-  track('level_complete', { ...levelProps(n), strokes: res.strokes, stars: st, maxed: res.maxed, dur });
+  track('coins_earn', { src: 'hole', n: coins });
+  track('level_complete', { ...levelProps(n), strokes: res.strokes, stars: st, maxed: res.maxed, dur, picked, mull: mullUsed });
   mode = 'end';
   gameplayStop();
   wakeLock?.release().catch(() => undefined);
   wakeLock = null;
   if (st === 3) happytime();
-  setTimeout(() => showHoleEnd(n, res.strokes, res.par, res.maxed, st, newBest, trophy), 1500);
+  setTimeout(() => showHoleEnd(n, res.strokes, res.par, res.maxed, st, newBest, trophy, coins), 1500);
 }
 
-function showHoleEnd(n: number, strokes: number, par: number, maxed: boolean, st: number, newBest: boolean, trophy: boolean) {
+/** Leaving the end screen with Next: the interstitial (if its caps allow one) and then the next hole. */
+async function leaveEnd(go: () => void) {
+  await maybeInterstitial();
+  go();
+}
+
+function showHoleEnd(n: number, strokes: number, par: number, maxed: boolean, st: number, newBest: boolean, trophy: boolean, coins: number) {
   if (mode !== 'end' || current?.kind !== 'level' || current.n !== n) return;
   setHudVisible(false);
   audio.play(st >= 2 ? 'win' : 'lose');
   const L = ROUTE[n - 1];
   const c = courseById(L.course);
   const hasNext = n < ROUTE_LEN;
-  const extra = trophy ? `<div class="trophy-won" style="--c:${c.color}"><span>🏆</span><b>${esc(tx(c.cup))}</b></div>` : '';
+  const extra = trophy ? `<button class="trophy-won" data-a="trophy" style="--c:${c.color}"><span>🏆</span><b>${esc(tx(c.cup))}</b></button>` : '';
+  let doubled = false;
+  if (trophy) setTimeout(() => void openTrophy(c.id, true), 2600);
   holeEndScreen({
     eyebrow: `${t('holeNum', { n })} · ${tx(c.name)}`,
     title: maxed ? t('pickedUp') : scoreName(strokes, par, false),
@@ -778,10 +1024,32 @@ function showHoleEnd(n: number, strokes: number, par: number, maxed: boolean, st
     newBest,
     hasNext,
     extraHtml: extra,
+    coins,
+    balance: save.coins,
+    canDouble: canReward() && coins > 0,
+    onDouble: async () => {
+      if (doubled) return null;
+      const ok = await showRewarded('double_coins');
+      if (!ok) {
+        toast(t('adFailed'), 'warn');
+        return null;
+      }
+      doubled = true;
+      save.coins += coins;
+      store.save();
+      track('coins_earn', { src: 'double_coins', n: coins });
+      return { coins: coins * 2, balance: save.coins };
+    },
+    onShop: () => {
+      audio.play('click');
+      showShop('end');
+    },
+    onTrophy: () => void openTrophy(c.id),
+    onCoin: () => audio.play('tick'),
     onNext: () => {
       audio.play('click');
       // the first holes go straight on; later ones show their card
-      openLevel(n + 1);
+      void leaveEnd(() => openLevel(n + 1));
     },
     onRetry: () => {
       audio.play('click');
@@ -866,6 +1134,15 @@ function finishDaily() {
     save.streak.last = d.key;
   }
   const best = save.daily[d.key].score;
+  // the first result of the day pays coins (at most 3 times in 24 h, whatever the phone's date)
+  let dCoins = 0;
+  if (!prev && takeDailyReward(save)) {
+    const holeSt = cur.scores.reduce((a, sc) => a + holeStars(sc.strokes ?? sc.par + 3, sc.par, !!sc.maxed), 0);
+    dCoins = dailyCoins(holeSt);
+    save.coins += dCoins;
+    track('coins_earn', { src: 'daily', n: dCoins });
+  }
+  noteLevelEnd();
   dailyRank = null;
   // the shared leaderboard ranks higher scores better: send "par − strokes" so fewer strokes rank higher
   submitDaily(d.key, d.num, 1000 + par - tot, st, tot / par, dur).then((rk) => {
@@ -895,7 +1172,7 @@ function finishDaily() {
     newBest,
     hasNext: false,
     footer: t('dailyAgain', { n: d.num + 1 }),
-    extraHtml: `<div id="end-rank" class="rank" hidden></div>`,
+    extraHtml: `<div id="end-rank" class="rank" hidden></div>${dCoins ? `<div class="coinbox"><div class="earn">${IC.coin}<b>+${num(dCoins)}</b></div></div>` : ''}`,
     shareText: () => shareFor(cur),
     onNext: () => undefined,
     onRetry: () => {
@@ -1058,6 +1335,7 @@ function tick(dt: number) {
     }
   }
   updateGuide();
+  updateMulliganButton();
   if (mode === 'between') {
     betweenT -= dt;
     if (betweenT <= 0) nextHole();
