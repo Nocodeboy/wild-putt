@@ -83,6 +83,7 @@ const S = {
   tWater: { es: '¡Al agua! +1', en: 'Splash! +1' },
   tVoid: { es: '¡Se cae! +1', en: 'Over the edge! +1' },
   tLava: { es: '¡Lava! +1', en: 'Lava! +1' },
+  tFlood: { es: '¡La marea! +1', en: 'Caught by the tide! +1' },
   tLip: { es: '¡Uy, por el borde!', en: 'Lipped out!' },
   tLavaRise: { es: 'La lava avanza…', en: 'The lava creeps closer…' },
   tLastStroke: { es: 'Último golpe', en: 'Last stroke' },

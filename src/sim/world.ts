@@ -18,6 +18,18 @@ const BEAM_W = 0.14; // half thickness of a spinning beam
 const STATIC = 2.0; // a resting ball stays put under pushes weaker than this
 const MAX_ROLL = 25; // seconds: a roll never takes longer than this
 const DROP_TIME = 0.75;
+const BOOST_SPEED = 9; // a booster sends the ball off at least this fast (cells/s)
+const JUMP_MIN = 3.2; // slower than this up a ramp: no take-off, the ball rolls off the edge
+const WELL_R = 2.6; // reach of a gravity well
+const WELL_K = 7; // its pull at the centre (cells/s²)
+const WELL_CORE = 0.42; // the black hole in the middle (+1)
+const PORTAL_R = 0.38;
+
+/** Cells whose ground changes with the hole's clock. */
+const DYN_TIDE = 1;
+const DYN_BRIDGE = 2;
+const DYN_GATE = 3;
+const DYN_GATE2 = 4;
 
 interface Friction {
   a: number; // constant deceleration
@@ -60,6 +72,10 @@ export interface HoleResult {
   maxed: boolean;
 }
 
+function frac(x: number): number {
+  return x - Math.floor(x);
+}
+
 /** Slope directions: 0 none, 1 towards -z (up the screen), 2 +z, 3 -x, 4 +x. */
 const SLOPE_V: [number, number][] = [
   [0, 0],
@@ -84,6 +100,19 @@ export class Sim {
   readonly movers: Mover[] = [];
   readonly maxStrokes: number;
   readonly frictionMul: number;
+  /** tide, drawbridge and portcullis cells (DYN_*), 0 elsewhere */
+  readonly dyn: Uint8Array;
+  /** boosters: direction code (as slopes: 1 −z, 2 +z, 3 −x, 4 +x) */
+  readonly boost: Uint8Array;
+  /** ramps: direction code of the take-off (towards the void beside them) */
+  readonly ramp: Uint8Array;
+  /** tunnels, by pairs (0↔1, 2↔3…) */
+  readonly portals: { x: number; z: number }[] = [];
+  /** gravity wells (their black hole is a void cell) */
+  readonly wells: { x: number; z: number }[] = [];
+  /** coins on the green, and the ones the real ball has rolled over this attempt */
+  readonly coins: { x: number; z: number }[] = [];
+  coinsGot: number[] = [];
   ball: Ball;
   strokes = 0;
   time = 0;
@@ -101,18 +130,23 @@ export class Sim {
   private lipped = false;
   private lastWallT = -1;
   private onSand = false;
+  private lastBoost = -1;
   private field: Float32Array | null = null;
 
   constructor(def: HoleDef, mods: HoleMods = {}) {
     this.def = def;
     this.mods = mods;
-    const rows = mods.mirror ? def.map.map((r) => [...r].reverse().join('').replace(/[<>]/g, (c) => (c === '<' ? '>' : '<'))) : def.map;
+    const swap: Record<string, string> = { '<': '>', '>': '<', '4': '6', '6': '4' };
+    const rows = mods.mirror ? def.map.map((r) => [...r].reverse().join('').replace(/[<>46]/g, (c) => swap[c])) : def.map;
     this.H = rows.length;
     this.W = Math.max(...rows.map((r) => r.length));
     const N = this.W * this.H;
     this.ground = new Uint8Array(N);
     this.slope = new Uint8Array(N);
-    this.frictionMul = mods.friction ?? 1;
+    this.dyn = new Uint8Array(N);
+    this.boost = new Uint8Array(N);
+    this.ramp = new Uint8Array(N);
+    this.frictionMul = (mods.friction ?? 1) * (def.gravity ?? 1);
     this.cupR = CUP_R * (mods.cup ?? 1);
     let cup = { x: 1.5, z: 1.5 };
     let tee = { x: 1.5, z: this.H - 1.5 };
@@ -169,6 +203,40 @@ export class Sim {
             break;
           case '.':
             break;
+          case 'w':
+            this.dyn[i] = DYN_TIDE;
+            break;
+          case '=':
+            this.dyn[i] = DYN_BRIDGE;
+            break;
+          case 'G':
+            this.dyn[i] = DYN_GATE;
+            break;
+          case 'H':
+            this.dyn[i] = DYN_GATE2;
+            break;
+          case '8':
+            this.boost[i] = 1;
+            break;
+          case '2':
+            this.boost[i] = 2;
+            break;
+          case '4':
+            this.boost[i] = 3;
+            break;
+          case '6':
+            this.boost[i] = 4;
+            break;
+          case 'J':
+            this.ramp[i] = 9; // direction worked out below, once the whole map is read
+            break;
+          case 'P':
+            this.portals.push({ x: x + 0.5, z: z + 0.5 });
+            break;
+          case 'M':
+            g = G.Void;
+            this.wells.push({ x: x + 0.5, z: z + 0.5 });
+            break;
           default:
             throw new Error(`Hole ${def.id}: unknown char '${ch}' at ${x},${z}`);
         }
@@ -176,6 +244,24 @@ export class Sim {
       }
     this.cup = cup;
     this.tee = tee;
+    // ramps take off towards the void next to them
+    for (let i = 0; i < N; i++) {
+      if (this.ramp[i] !== 9) continue;
+      const x = i % this.W;
+      const z = (i - x) / this.W;
+      this.ramp[i] = 0;
+      for (let k = 1; k <= 4; k++) {
+        const [dx, dz] = SLOPE_V[k];
+        const nx = x + dx;
+        const nz = z + dz;
+        if (nx < 0 || nz < 0 || nx >= this.W || nz >= this.H || this.ground[nz * this.W + nx] === G.Void) {
+          this.ramp[i] = k;
+          break;
+        }
+      }
+    }
+    if (this.portals.length % 2) this.portals.pop();
+    for (const [cx, cz] of def.coins ?? []) this.coins.push({ x: mods.mirror ? this.W - cx : cx, z: cz });
     spinCells.forEach((c, k) => {
       const s = def.spinners?.[k] ?? { len: 2, speed: 1.2 };
       this.spinners.push({ x: c.x, z: c.z, len: s.len, speed: mods.mirror ? -s.speed : s.speed, phase: s.phase ?? 0 });
@@ -240,6 +326,56 @@ export class Sim {
     if (cx < 0 || cz < 0 || cx >= this.W || cz >= this.H) return 0;
     return this.slope[cz * this.W + cx];
   }
+  /** Tide or drawbridge up at time t: the cell is water. */
+  floodUp(kind: number, t: number): boolean {
+    if (kind === DYN_TIDE) {
+      const c = this.def.tide ?? { period: 8, phase: 0, up: 0.45 };
+      return frac(t / c.period + c.phase) < c.up;
+    }
+    if (kind === DYN_BRIDGE) {
+      const c = this.def.bridge ?? { period: 8, phase: 0 };
+      return frac(t / c.period + c.phase) < 0.4;
+    }
+    return false;
+  }
+  /** How far the tide / bridge is through its cycle (0..1), for the visuals. */
+  cycle(kind: number, t: number): number {
+    if (kind === DYN_TIDE) {
+      const c = this.def.tide ?? { period: 8, phase: 0, up: 0.45 };
+      return frac(t / c.period + c.phase);
+    }
+    if (kind === DYN_BRIDGE) {
+      const c = this.def.bridge ?? { period: 8, phase: 0 };
+      return frac(t / c.period + c.phase);
+    }
+    const c = this.def.gates ?? { period: 5, phase: 0 };
+    return frac(t / c.period + c.phase + (kind === DYN_GATE2 ? 0.5 : 0));
+  }
+  /** A portcullis is down (a wall) for the first half of its cycle. */
+  gateDown(kind: number, t: number): boolean {
+    return (kind === DYN_GATE || kind === DYN_GATE2) && this.cycle(kind, t) < 0.5;
+  }
+  /** Ground under (x, z) at time t: the tide and the drawbridge turn cells to water. */
+  groundAtT(x: number, z: number, t: number): Ground {
+    const cx = Math.floor(x);
+    const cz = Math.floor(z);
+    if (cx < 0 || cz < 0 || cx >= this.W || cz >= this.H) return G.Void;
+    const i = cz * this.W + cx;
+    const k = this.dyn[i];
+    if ((k === DYN_TIDE || k === DYN_BRIDGE) && this.floodUp(k, t)) return G.Water;
+    return this.ground[i] as Ground;
+  }
+  /** A cell the ball bounces off at time t (walls, and portcullises while they are down). */
+  solid(cx: number, cz: number, t: number): boolean {
+    if (cx < 0 || cz < 0 || cx >= this.W || cz >= this.H) return false;
+    const i = cz * this.W + cx;
+    return this.ground[i] === G.Wall || this.gateDown(this.dyn[i], t);
+  }
+  /** Cells where a ball must not be put back after a penalty (or left by the bot). */
+  unsafe(i: number): boolean {
+    return !!(this.slope[i] || this.dyn[i] || this.boost[i] || this.ramp[i]) || this.portals.some((p) => Math.floor(p.z) * this.W + Math.floor(p.x) === i);
+  }
+
   /** The deck's sideways tilt right now (ship), as an acceleration along x. */
   swayAt(t: number): number {
     const s = this.def.sway;
@@ -275,6 +411,35 @@ export class Sim {
    * (the real ball); the bot's imaginary balls run silently.
    */
   integrate(b: Ball, t: number, dt: number, fx = false): Outcome {
+    // in the air (a ramp jump): no friction, no slopes, no hazards until it lands
+    if (b.air && b.air > 0) {
+      b.air -= dt;
+      const dur = b.airDur ?? 0.5;
+      const u = 1 - Math.max(0, b.air) / dur;
+      b.y = 4 * (0.3 + dur * 0.55) * u * (1 - u);
+      b.x += b.vx * dt;
+      b.z += b.vz * dt;
+      b.x = Math.max(BALL_R, Math.min(this.W - BALL_R, b.x));
+      b.z = Math.max(BALL_R, Math.min(this.H - BALL_R, b.z));
+      if (b.air > 0) return 'roll';
+      b.air = 0;
+      b.y = 0;
+      // a landing knocks some speed off
+      b.vx *= 0.82;
+      b.vz *= 0.82;
+      if (fx) this.emit('land', b.x, b.z);
+      const gl = this.groundAtT(b.x, b.z, t);
+      if (gl === G.Void) return 'void';
+      if (gl === G.Water) return 'water';
+      if (gl === G.Lava) return 'lava';
+      if (gl === G.Wall) {
+        // landed on top of a rail or a block: it drops back onto the green beside it
+        const p = this.safeSpot(b.x, b.z);
+        b.x = p.x;
+        b.z = p.z;
+      }
+      return 'roll';
+    }
     let sp = Math.hypot(b.vx, b.vz);
     const g = this.groundAt(b.x, b.z);
     const [ex, ez] = this.external(b.x, b.z, t);
@@ -290,6 +455,18 @@ export class Sim {
     }
     b.vx += ex * dt;
     b.vz += ez * dt;
+    // gravity wells pull the ball in; their black hole swallows it
+    for (const w of this.wells) {
+      const dx = w.x - b.x;
+      const dz = w.z - b.z;
+      const d = Math.hypot(dx, dz);
+      if (d < WELL_CORE) return 'void';
+      if (d < WELL_R) {
+        const a = WELL_K * (1 - d / WELL_R);
+        b.vx += (dx / d) * a * dt;
+        b.vz += (dz / d) * a * dt;
+      }
+    }
     // the cup: slow balls are pulled in and drop, fast ones lip out
     const dcx = this.cup.x - b.x;
     const dcz = this.cup.z - b.z;
@@ -314,7 +491,59 @@ export class Sim {
     b.x += b.vx * dt;
     b.z += b.vz * dt;
     this.collide(b, t, dt, fx);
-    const g2 = this.groundAt(b.x, b.z);
+    const ci = Math.floor(b.z) * this.W + Math.floor(b.x);
+    const inMap = b.x >= 0 && b.z >= 0 && b.x < this.W && b.z < this.H;
+    // boosters: at least BOOST_SPEED in their direction, and most of the sideways speed goes
+    const bo = inMap ? this.boost[ci] : 0;
+    if (bo) {
+      const [dx, dz] = SLOPE_V[bo];
+      const along = b.vx * dx + b.vz * dz;
+      const side = b.vx * -dz + b.vz * dx;
+      const na = Math.max(along, BOOST_SPEED);
+      if (fx && along < BOOST_SPEED - 0.5 && this.lastBoost !== ci) this.emit('boost', b.x, b.z, na);
+      if (fx) this.lastBoost = ci;
+      b.vx = dx * na + -dz * side * 0.55;
+      b.vz = dz * na + dx * side * 0.55;
+    } else if (fx) this.lastBoost = -1;
+    // ramps: fast enough towards the edge, the ball takes off
+    const rp = inMap ? this.ramp[ci] : 0;
+    if (rp) {
+      const [dx, dz] = SLOPE_V[rp];
+      const along = b.vx * dx + b.vz * dz;
+      if (along > JUMP_MIN) {
+        const dur = Math.min(1.15, 0.16 + along * 0.075) * (this.def.gravity ? 1.35 : 1);
+        b.air = b.airDur = dur;
+        if (fx) this.emit('jump', b.x, b.z, dur);
+        return 'roll';
+      }
+    }
+    // tunnels: in through one, out of its pair with the same speed
+    if (this.portals.length) {
+      if (b.lock !== undefined && Math.hypot(b.x - this.portals[b.lock].x, b.z - this.portals[b.lock].z) > 0.62) b.lock = undefined;
+      for (let k = 0; k < this.portals.length; k++) {
+        if (k === b.lock) continue;
+        const p = this.portals[k];
+        if (Math.hypot(b.x - p.x, b.z - p.z) >= PORTAL_R) continue;
+        const o = this.portals[k ^ 1];
+        const v = Math.hypot(b.vx, b.vz) || 1;
+        b.x = o.x + (b.vx / v) * 0.05;
+        b.z = o.z + (b.vz / v) * 0.05;
+        b.lock = k ^ 1;
+        if (fx) this.emit('portal', p.x, p.z, k);
+        break;
+      }
+    }
+    // coins (only the real ball collects them)
+    if (fx)
+      for (let k = 0; k < this.coins.length; k++) {
+        if (this.coinsGot.includes(k)) continue;
+        const c = this.coins[k];
+        if (Math.hypot(b.x - c.x, b.z - c.z) < 0.42) {
+          this.coinsGot.push(k);
+          this.emit('coin', c.x, c.z, k);
+        }
+      }
+    const g2 = this.groundAtT(b.x, b.z, t);
     if (g2 === G.Water) return 'water';
     if (g2 === G.Void) return 'void';
     if (g2 === G.Lava) return 'lava';
@@ -324,7 +553,7 @@ export class Sim {
       this.onSand = sand;
     }
     sp = Math.hypot(b.vx, b.vz);
-    if (sp < 0.07) {
+    if (sp < 0.07 && !bo) {
       const [ax, az] = this.external(b.x, b.z, t);
       if (Math.hypot(ax, az) < STATIC * this.frictionMul || g2 === G.Sand) {
         b.vx = b.vz = 0;
@@ -362,8 +591,7 @@ export class Sim {
       let bnz = 0;
       for (let cz = z0; cz <= z1; cz++)
         for (let cx = x0; cx <= x1; cx++) {
-          if (cx < 0 || cz < 0 || cx >= this.W || cz >= this.H) continue;
-          if (this.ground[cz * this.W + cx] !== G.Wall) continue;
+          if (!this.solid(cx, cz, t)) continue;
           const px = Math.max(cx, Math.min(b.x, cx + 1));
           const pz = Math.max(cz, Math.min(b.z, cz + 1));
           let dx = b.x - px;
@@ -505,6 +733,18 @@ export class Sim {
     if (this.state === 'done') return;
     const dt = SIM_DT;
     this.time += dt;
+    if (this.state === 'aim' && this.dyn.length) {
+      // the tide (or the drawbridge) comes up under a resting ball: +1, as if it had rolled in
+      const b = this.ball;
+      if (this.groundAtT(b.x, b.z, this.time) === G.Water) {
+        this.state = 'drop';
+        b.state = 'drop';
+        this.dropKind = 'water';
+        this.dropT = 0;
+        this.emit('flood', b.x, b.z);
+        return;
+      }
+    }
     if (this.state === 'roll') {
       this.rollT += dt;
       const b = this.ball;
@@ -621,9 +861,48 @@ export class Sim {
           const c = (dx && dz ? 1.414 : 1) * (this.ground[j] === G.Sand ? 1.8 : 1);
           if (d[u] + c < d[j]) d[j] = d[u] + c;
         }
+      // (the field runs from the cup outwards: a cell reaches the cup through a tunnel or over a jump)
+      for (const [j, c] of this.links(u)) if (d[u] + c < d[j]) d[j] = d[u] + c;
     }
     this.field = d;
     return d;
+  }
+
+  /** Cells that lead into cell u without rolling there: the far end of a tunnel, a ramp that jumps onto it. */
+  private linkCache: Map<number, [number, number][]> | null = null;
+  links(u: number): [number, number][] {
+    if (!this.linkCache) {
+      const m = new Map<number, [number, number][]>();
+      const add = (to: number, from: number, c: number) => {
+        if (!m.has(to)) m.set(to, []);
+        m.get(to)!.push([from, c]);
+      };
+      const cell = (p: { x: number; z: number }) => Math.floor(p.z) * this.W + Math.floor(p.x);
+      for (let k = 0; k + 1 < this.portals.length; k += 2) {
+        const a = cell(this.portals[k]);
+        const b = cell(this.portals[k + 1]);
+        add(a, b, 1);
+        add(b, a, 1);
+      }
+      for (let i = 0; i < this.ramp.length; i++) {
+        const r = this.ramp[i];
+        if (!r) continue;
+        const [dx, dz] = SLOPE_V[r];
+        const x = i % this.W;
+        const z = (i - x) / this.W;
+        for (let k = 2; k <= 6; k++) {
+          const nx = x + dx * k;
+          const nz = z + dz * k;
+          if (nx < 0 || nz < 0 || nx >= this.W || nz >= this.H) break;
+          const j = nz * this.W + nx;
+          if (this.ground[j] === G.Void) continue;
+          if (this.ground[j] === G.Green || this.ground[j] === G.Sand || this.ground[j] === G.Ice) add(j, i, k);
+          break;
+        }
+      }
+      this.linkCache = m;
+    }
+    return this.linkCache.get(u) ?? [];
   }
 
   /**
@@ -672,7 +951,7 @@ export class Sim {
     };
     const cx = Math.floor(x);
     const cz = Math.floor(z);
-    if (ok(cx, cz) && !this.slope[cz * this.W + cx]) {
+    if (ok(cx, cz) && !this.unsafe(cz * this.W + cx)) {
       // stay where it was, but clear of the walls
       return { x: Math.max(cx + BALL_R + 0.02, Math.min(cx + 1 - BALL_R - 0.02, x)), z: Math.max(cz + BALL_R + 0.02, Math.min(cz + 1 - BALL_R - 0.02, z)) };
     }
@@ -680,7 +959,7 @@ export class Sim {
     let bd = Infinity;
     for (let gz = 0; gz < this.H; gz++)
       for (let gx = 0; gx < this.W; gx++) {
-        if (!ok(gx, gz) || this.slope[gz * this.W + gx]) continue;
+        if (!ok(gx, gz) || this.unsafe(gz * this.W + gx)) continue;
         const d = Math.hypot(gx + 0.5 - x, gz + 0.5 - z) + Math.hypot(gx + 0.5 - this.cup.x, gz + 0.5 - this.cup.z) * 0.02;
         if (d < bd) {
           bd = d;

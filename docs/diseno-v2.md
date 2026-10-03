@@ -70,7 +70,7 @@ Marcados como supuestos porque no se hablaron uno a uno. Si alguno no vale, se c
 | 1 | The Garden · El jardín | Rebotar en las paredes; arena que frena | Jardín con valla de madera y árboles | 1 | Garden Cup |
 | 2 | The Rooftops · Los tejados | Sin pretil la bola cae a la calle; tejas en pendiente | Tejados de una ciudad, calle abajo | 2 | Chimney Cup |
 | 3 | The Pirate Ship · El barco pirata | La cubierta se inclina con el oleaje | Barco en mar abierto | 5 | Anchor Cup |
-| 4 | The Night Fair · La feria | Molinos que giran y setas que rebotan | Feria de noche con bombillas y noria | 9 | Carousel Cup |
+| 4 | The Funfair · La feria | Molinos que giran y setas que rebotan | Feria de noche con bombillas y noria | 9 | Carousel Cup |
 | 5 | The Glacier · El glaciar | Hielo que no frena; bloques que se deslizan | Glaciar con abetos nevados | 14 | Snowflake Cup |
 | 6 | The Volcano · El volcán | La lava avanza con cada golpe | Volcán con ríos de lava | 21 | Magma Cup |
 | 7 | The Beach · La playa | **Marea**: la arena mojada se cubre de agua y se descubre cada pocos segundos | Playa tropical con palmeras y chiringuito | 27 | Seashell Cup |

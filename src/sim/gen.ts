@@ -504,6 +504,112 @@ function island(c: Ctx) {
   }
 }
 
+
+// ---------- the six new courses ----------
+/** Beach: a band of wet sand right across the fairway that the tide covers now and then. */
+function tideBand(c: Ctx) {
+  const p = spot(c, 0.25, 0.8, 3);
+  if (!p) return;
+  const [dx, dz] = DIRS[p.s.dir];
+  const rows = c.d > 0.5 && c.r.next() < 0.5 ? 2 : 1;
+  for (let k = 0; k < rows; k++) for (const [x, z] of across(p.s, p.x + dx * k, p.z + dz * k)) if (free(c.b, x, z, 1)) c.b.cv.set(x, z, 'w');
+}
+
+/** Temple: a pair of tunnels; when `forced`, a wall seals the fairway between them and the tunnel is the way. */
+function tunnels(c: Ctx, forced: boolean) {
+  const a = spot(c, 0.12, 0.38, 3);
+  const b = spot(c, 0.72, 0.95, 3);
+  if (!a || !b || a.t >= b.t - 3) return;
+  const pa = c.r.pick(across(a.s, a.x, a.z).filter(([x, z]) => free(c.b, x, z, 1)));
+  const pb = c.r.pick(across(b.s, b.x, b.z).filter(([x, z]) => free(c.b, x, z, 1)));
+  if (!pa || !pb) return;
+  if (forced) {
+    const w = spot(c, 0.45, 0.62, 3);
+    if (!w || w.t <= a.t + 1 || w.t >= b.t - 1) return;
+    for (const [x, z] of across(w.s, w.x, w.z)) c.b.cv.set(x, z, '#');
+  }
+  c.b.cv.set(pa[0], pa[1], 'P');
+  c.b.cv.set(pb[0], pb[1], 'P');
+}
+
+/**
+ * Castle: a row of portcullises right across the fairway. 'H' rows go up when the 'G' rows come down, so an 'H' row
+ * only goes well away from the other rows (a ball needs time to roll from one to the next).
+ */
+const gateTs: number[] = [];
+function gateRow(c: Ctx, ch: 'G' | 'H') {
+  for (let k = 0; k < 6; k++) {
+    const p = spot(c, 0.25, 0.8, 3);
+    if (!p) return;
+    if (gateTs.some((t) => Math.abs(t - p.t) < (ch === 'H' ? 5 : 2))) continue;
+    for (const [x, z] of across(p.s, p.x, p.z)) if (free(c.b, x, z, 1)) c.b.cv.set(x, z, ch);
+    gateTs.push(p.t);
+    return;
+  }
+}
+
+/** Castle: a moat across the fairway, with a drawbridge in the middle that rises now and then. */
+function drawbridge(c: Ctx) {
+  const p = spot(c, 0.3, 0.75, 3);
+  if (!p) return;
+  const cells = across(p.s, p.x, p.z);
+  const mid = Math.floor((cells.length - 1) / 2);
+  cells.forEach(([x, z], i) => {
+    if (!free(c.b, x, z, 1)) return;
+    c.b.cv.set(x, z, i === mid || (cells.length >= 5 && i === mid + 1) ? '=' : '~');
+  });
+}
+
+/** Neon: booster pads down the middle of a stretch, pointing along it. */
+function boosters(c: Ctx) {
+  const p = spot(c, 0.1, 0.65, 3);
+  if (!p) return;
+  const ch = ['8', '6', '2', '4'][p.s.dir];
+  const [dx, dz] = DIRS[p.s.dir];
+  const n = c.r.int(1, 2);
+  for (let k = 0; k < n; k++) if (free(c.b, p.x + dx * k, p.z + dz * k, 1)) c.b.cv.set(p.x + dx * k, p.z + dz * k, ch);
+}
+
+/** Canyon: a gap of void right across a stretch, with a row of ramps just before it. */
+function chasm(c: Ctx) {
+  const p = spot(c, 0.35, 0.68, 3);
+  if (!p) return false;
+  const [dx, dz] = DIRS[p.s.dir];
+  const s = p.s;
+  // the stretch must carry on for a few cells beyond the gap
+  const toB = Math.abs(p.x - s.bx) + Math.abs(p.z - s.bz);
+  const gap = c.d > 0.6 && c.r.next() < 0.5 ? 3 : 2;
+  if (toB < gap + 2 && p.seg !== c.b.segs.length - 1) return false;
+  const ramp = across(s, p.x - dx, p.z - dz);
+  if (!ramp.every(([x, z]) => free(c.b, x, z, 1))) return false;
+  for (let k = 0; k < gap; k++)
+    for (const [x, z] of across(s, p.x + dx * k, p.z + dz * k)) {
+      if (near(c.b.cup, x, z, 1)) return false;
+    }
+  for (const [x, z] of ramp) c.b.cv.set(x, z, 'J');
+  for (let k = 0; k < gap; k++) {
+    const cells = across(s, p.x + dx * k, p.z + dz * k);
+    for (const [x, z] of cells) c.b.cv.set(x, z, ' ');
+    // no rails along the sides of the gap
+    const [x0, z0] = cells[0];
+    const [x1, z1] = cells[cells.length - 1];
+    const ox = dz === 0 ? 0 : 1;
+    const oz = dz === 0 ? 1 : 0;
+    if (!c.b.cv.carved(x0 - ox, z0 - oz)) c.b.cv.seg[(z0 - oz) * SIZE + x0 - ox] = -2;
+    if (!c.b.cv.carved(x1 + ox, z1 + oz)) c.b.cv.seg[(z1 + oz) * SIZE + x1 + ox] = -2;
+  }
+  return true;
+}
+
+/** Moon: a gravity well at the side of a stretch (its black hole is a hazard). */
+function well(c: Ctx) {
+  const p = spot(c, 0.25, 0.8, 4);
+  if (!p) return;
+  const cells = across(p.s, p.x, p.z);
+  const [x, z] = c.r.next() < 0.5 ? cells[0] : cells[cells.length - 1];
+  if (free(c.b, x, z, 2) && !hasAround(c, x, z, 'M', 3)) c.b.cv.set(x, z, 'M');
+}
+
 // ---------- the course's own mechanic and dressing ----------
 function dress(c: Ctx) {
   const { r, d, course } = c;
@@ -563,6 +669,50 @@ function dress(c: Ctx) {
       }
       break;
     }
+    case 'beach':
+      if (p(0.9)) tideBand(c);
+      if (d > 0.4 && p(0.45)) tideBand(c);
+      if (p(0.5)) sand(c);
+      if (p(0.35)) pool(c, '~');
+      if (!roomy && p(0.35)) block(c);
+      c.out.tide = { period: Math.round(r.range(7, 10) * 10) / 10, phase: Math.round(r.next() * 100) / 100, up: Math.round(r.range(0.36, 0.48) * 100) / 100 };
+      break;
+    case 'temple':
+      tunnels(c, !roomy && p(0.45));
+      if (p(0.4)) band(c, ' ', 0.3, 0.7, 2);
+      if (p(0.4)) sand(c);
+      if (!roomy && p(0.4)) block(c);
+      break;
+    case 'castle':
+      gateTs.length = 0;
+      if (p(0.75)) gateRow(c, 'G');
+      if (d > 0.45 && p(0.45)) gateRow(c, 'H');
+      if (p(0.5)) drawbridge(c);
+      if (!roomy && p(0.4)) block(c);
+      c.out.gates = { period: Math.round(r.range(4, 6) * 10) / 10, phase: Math.round(r.next() * 100) / 100 };
+      c.out.bridge = { period: Math.round(r.range(7, 9) * 10) / 10, phase: Math.round(r.next() * 100) / 100 };
+      break;
+    case 'neon':
+      if (p(0.85)) boosters(c);
+      if (d > 0.4 && p(0.4)) boosters(c);
+      if (p(OPEN_EDGES.neon!)) openEdge(c);
+      if (p(0.45)) bumpers(c, r.int(1, 2));
+      if (p(0.3)) slope(c);
+      break;
+    case 'canyon':
+      if (!roomy) chasm(c);
+      if (p(OPEN_EDGES.canyon!)) openEdge(c);
+      if (p(0.35)) slope(c);
+      if (p(0.3)) sand(c);
+      break;
+    case 'moon':
+      c.out.gravity = 0.45;
+      if (p(0.85)) well(c);
+      if (d > 0.45 && p(0.45)) well(c);
+      if (p(OPEN_EDGES.moon!)) openEdge(c);
+      if (p(0.3)) band(c, ' ', 0.3, 0.7, 2);
+      if (!roomy && p(0.35)) block(c);
+      break;
     default:
       break;
   }
@@ -735,7 +885,8 @@ export function generate(o: GenOpts): GenHole {
   const d = Math.max(0, Math.min(1.1, o.d));
   for (let attempt = 0; attempt < 200; attempt++) {
     const r = new Rng(hashString(`${o.course}/${o.seed}/${attempt}`));
-    const pool = TEMPLATES.map((x) => ({ t: x.t, w: x.w(d, !!o.champ) })).filter((x) => x.w > 0);
+    // (a canyon hole needs a straight stretch for its gap: no open rooms there)
+    const pool = TEMPLATES.map((x) => ({ t: x.t, w: x.w(d, !!o.champ) })).filter((x) => x.w > 0 && !(o.course === 'canyon' && (x.t === 'room' || x.t === 'fork' || x.t === 'island')));
     let pickW = r.next() * pool.reduce((a, x) => a + x.w, 0);
     let tpl: Template = pool[0].t;
     for (const x of pool) {
@@ -770,6 +921,11 @@ export function generate(o: GenOpts): GenHole {
       return true;
     })();
     if (!okCup) continue;
+    // every course keeps its mechanic: a canyon hole with no gap, a temple with no tunnel… try again
+    const has = (ch: string) => cr.map.some((row) => row.includes(ch));
+    const need: Partial<Record<ThemeId, string>> = { canyon: 'J', temple: 'P', beach: 'w', neon: '8246', castle: 'GH=' };
+    const nd = need[o.course];
+    if (nd && attempt < 150 && ![...nd].some(has)) continue;
     out.map = cr.map;
     const sh = (v: number, ax: 'x' | 'z') => v - (ax === 'x' ? cr.ox : cr.oz);
     // (one definition per 'S', in reading order)

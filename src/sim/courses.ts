@@ -230,6 +230,105 @@ export const COURSES: CourseDef[] = [
       }),
     ],
   },
+  {
+    id: 'beach',
+    color: '#2ec4b6',
+    cup: { en: 'Seashell Cup', es: 'Copa de la Concha' },
+    num: 7,
+    name: { es: 'La playa', en: 'The Beach' },
+    tip: { es: 'La marea sube y baja: la arena mojada se cubre de agua unos segundos. Elige el momento; una bola en el agua es +1.', en: 'The tide comes and goes: the wet sand floods for a few seconds. Pick your moment; a ball in the water is +1.' },
+    holes: [
+      h({
+        id: 'b1',
+        name: { es: 'Marea baja', en: 'Low Tide' },
+        par: 2,
+        tide: { period: 8, phase: 0.55, up: 0.42 },
+        map: ['#########', '#...O...#', '#.......#', '#.......#', '#wwwwwww#', '#wwwwwww#', '#.......#', '#.......#', '#...T...#', '#########'],
+      }),
+    ],
+  },
+  {
+    id: 'temple',
+    color: '#e0a84b',
+    cup: { en: 'Scarab Cup', es: 'Copa del Escarabajo' },
+    num: 8,
+    name: { es: 'El templo del sol', en: 'The Sun Temple' },
+    tip: { es: 'Túneles: la bola entra por uno y sale por su pareja, con la misma velocidad y en la misma dirección.', en: 'Tunnels: in through one, out of its twin at the same speed and heading.' },
+    holes: [
+      h({
+        id: 't1',
+        name: { es: 'La puerta secreta', en: 'The Secret Door' },
+        par: 2,
+        map: ['#########', '#...O...#', '#.......#', '#...P...#', '#########', '#.......#', '#...P...#', '#.......#', '#.......#', '#...T...#', '#########'],
+      }),
+    ],
+  },
+  {
+    id: 'castle',
+    color: '#9aa7c7',
+    cup: { en: 'Crown Cup', es: 'Copa de la Corona' },
+    num: 9,
+    name: { es: 'El castillo', en: 'The Castle' },
+    tip: { es: 'Los rastrillos suben y bajan, y el puente levadizo se levanta sobre el foso. Espera tu momento.', en: 'Portcullises rise and fall, and the drawbridge lifts over the moat. Wait for your moment.' },
+    holes: [
+      h({
+        id: 'c1',
+        name: { es: 'El rastrillo', en: 'The Portcullis' },
+        par: 2,
+        gates: { period: 4, phase: 0.3 },
+        map: ['#########', '#...O...#', '#.......#', '#.......#', '###GGG###', '#.......#', '#.......#', '#.......#', '#...T...#', '#########'],
+      }),
+    ],
+  },
+  {
+    id: 'neon',
+    color: '#ff3fb4',
+    cup: { en: 'Neon Cup', es: 'Copa de Neón' },
+    num: 10,
+    name: { es: 'La ciudad de neón', en: 'Neon City' },
+    tip: { es: 'Los aceleradores lanzan la bola hacia donde apuntan sus flechas. Sin pretil, la bola se cae a la calle.', en: 'Boost pads launch the ball the way their arrows point. No railing means a drop to the street.' },
+    holes: [
+      h({
+        id: 'n1',
+        name: { es: 'El carril rápido', en: 'Fast Lane' },
+        par: 2,
+        map: ['#######', '#..O..#', '#.....#', '#.....#', '#.....#', '#.....#', '#vvvvv#', '#vvvvv#', '#.....#', '#..8..#', '#.....#', '#..T..#', '#######'],
+      }),
+    ],
+  },
+  {
+    id: 'canyon',
+    color: '#d0603f',
+    cup: { en: 'Canyon Cup', es: 'Copa del Cañón' },
+    num: 11,
+    name: { es: 'El cañón', en: 'The Canyon' },
+    tip: { es: 'Sube las rampas con fuerza para saltar el cañón. Si vas flojo, la bola cae (+1).', en: 'Hit the ramps hard enough to clear the gap. Too soft and the ball drops (+1).' },
+    holes: [
+      h({
+        id: 'y1',
+        name: { es: 'El salto', en: 'The Gap' },
+        par: 2,
+        map: ['#######', '#..O..#', '#.....#', '#.....#', '#.....#', '       ', '       ', '#JJJJJ#', '#.....#', '#.....#', '#..T..#', '#######'],
+      }),
+    ],
+  },
+  {
+    id: 'moon',
+    color: '#b9c4dd',
+    cup: { en: 'World Tour Trophy', es: 'Trofeo de la Gira Mundial' },
+    num: 12,
+    name: { es: 'La base lunar', en: 'Moon Base' },
+    tip: { es: 'Poca gravedad: la bola casi no frena. Los pozos de gravedad la atraen, y su agujero negro se la traga (+1).', en: 'Low gravity: the ball barely slows down. Gravity wells pull it in, and their black hole swallows it (+1).' },
+    holes: [
+      h({
+        id: 'm1',
+        name: { es: 'Gravedad cero', en: 'Zero G' },
+        par: 2,
+        gravity: 0.45,
+        map: ['#########', '#...O...#', '#.......#', '#.......#', '#.......#', '#.....M.#', '#.......#', '#.......#', '#...T...#', '#########'],
+      }),
+    ],
+  },
 ];
 
 export const ALL_HOLES: { course: CourseDef; hole: HoleDef; index: number }[] = COURSES.flatMap((c) => c.holes.map((hole, index) => ({ course: c, hole, index })));

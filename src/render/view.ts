@@ -88,6 +88,35 @@ function lavaTexture(): THREE.CanvasTexture {
   return t;
 }
 
+/** A spiral for the tunnels (drawn white; the material tints it). */
+function swirlTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  g.translate(64, 64);
+  for (let arm = 0; arm < 3; arm++) {
+    g.beginPath();
+    for (let k = 0; k < 60; k++) {
+      const u = k / 60;
+      const a = arm * ((PI * 2) / 3) + u * PI * 3;
+      const r = u * 62;
+      if (k) g.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      else g.moveTo(0, 0);
+    }
+    g.strokeStyle = 'rgba(255,255,255,0.9)';
+    g.lineWidth = 7;
+    g.stroke();
+  }
+  const rg = g.createRadialGradient(0, 0, 0, 0, 0, 64);
+  rg.addColorStop(0, 'rgba(255,255,255,0.9)');
+  rg.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = rg;
+  g.fillRect(-64, -64, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export interface Aim {
   angle: number;
   power: number;
@@ -150,6 +179,17 @@ export class LevelView {
   private puffs = new FxList(800);
   private lights: THREE.PointLight[] = [];
   private bulbs: THREE.Mesh[] = [];
+  // the new courses' moving parts
+  private tideMesh: THREE.Mesh | null = null;
+  private tideTex: THREE.CanvasTexture | null = null;
+  private bridge: THREE.Group | null = null;
+  private bridgeL = 0;
+  private gates: { g: THREE.Object3D; kind: number; y: number }[] = [];
+  private boostMat: THREE.MeshBasicMaterial | null = null;
+  private portalDiscs: THREE.Mesh[] = [];
+  private wellParts: { ring: THREE.Mesh; pull: THREE.Mesh[] }[] = [];
+  private coinMeshes: THREE.Mesh[] = [];
+  private swirlTex: THREE.CanvasTexture | null = null;
   private tier: 'high' | 'medium' | 'low' = 'high';
   private trailT = 0;
   private time = 0;
@@ -282,11 +322,12 @@ export class LevelView {
     stripe.position.y = 0.112;
     this.putterHead.add(head, stripe);
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.3, 8), steel);
-    shaft.position.set(-0.17, 0.72, 0);
-    shaft.rotation.z = 0.26;
+    // the shaft leans to the player's side (not back over the ball, where it would hide it from the camera)
+    shaft.position.set(-0.07, 0.7, 0.2);
+    shaft.rotation.set(0.3, 0, 0.1);
     const gr = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.03, 0.36, 8), grip);
-    gr.position.set(-0.32, 1.27, 0);
-    gr.rotation.z = 0.26;
+    gr.position.set(-0.13, 1.22, 0.37);
+    gr.rotation.set(0.3, 0, 0.1);
     this.putterHead.add(shaft, gr);
     this.putter.add(this.putterHead);
     this.putter.visible = false;
@@ -326,12 +367,182 @@ export class LevelView {
       inner.add(this.lavaLight);
       this.syncLava();
     }
+    // ---- the new courses: tide, drawbridge, portcullises, boosters, ramps, tunnels, wells; and the coins ----
+    this.buildDynamic();
     // ---- surroundings ----
     this.buildSurround();
     this.group.add(this.sparkP.points, this.puffP.points);
     this.puffP.points.renderOrder = 3;
     this.sparkP.points.renderOrder = 4;
     this.setTier(tier);
+  }
+
+
+  /** The new courses' moving parts, and the coins. */
+  private buildDynamic() {
+    const s = this.sim;
+    const t = this.theme;
+    const glow = t.glow ?? 0x36e0ff;
+    const vmat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const cellOf = (i: number) => ({ x: i % s.W, z: Math.floor(i / s.W) });
+    // ---- tide: a sheet of water over the wet sand that rises and falls ----
+    const tq: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < s.dyn.length; i++) {
+      if (s.dyn[i] !== 1) continue;
+      const { x, z } = cellOf(i);
+      const g = new THREE.PlaneGeometry(1, 1);
+      g.rotateX(-PI / 2);
+      g.translate(x + 0.5, 0, z + 0.5);
+      const pos = g.attributes.position;
+      const uv = new Float32Array(pos.count * 2);
+      for (let k = 0; k < pos.count; k++) {
+        uv[k * 2] = pos.getX(k) * 0.5;
+        uv[k * 2 + 1] = pos.getZ(k) * 0.5;
+      }
+      g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3).fill(1), 3));
+      tq.push(g);
+    }
+    if (tq.length) {
+      this.tideTex = rippleTexture(t.water);
+      this.tideMesh = new THREE.Mesh(merge(tq), new THREE.MeshLambertMaterial({ map: this.tideTex, transparent: true, opacity: 0, depthWrite: false }));
+      this.tideMesh.renderOrder = 1;
+      this.inner.add(this.tideMesh);
+    }
+    // ---- drawbridge: planks that lift clear of the moat ----
+    const bp: Part[] = [];
+    for (let i = 0; i < s.dyn.length; i++) {
+      if (s.dyn[i] !== 2) continue;
+      const { x, z } = cellOf(i);
+      for (let k = 0; k < 4; k++) bp.push(part(box(0.96, 0.08, 0.22), k % 2 ? 0x8a5a30 : 0x9a6a3a, x + 0.5, -0.04, z + 0.14 + k * 0.24));
+      bp.push(part(box(0.1, 0.1, 1), 0x4a2a14, x + 0.1, 0.0, z + 0.5), part(box(0.1, 0.1, 1), 0x4a2a14, x + 0.9, 0.0, z + 0.5));
+    }
+    if (bp.length) {
+      this.bridge = new THREE.Group();
+      const m = new THREE.Mesh(merge(bp), vmat);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      this.bridge.add(m);
+      this.inner.add(this.bridge);
+    }
+    // ---- portcullises: an iron grid per row (G and H), under a stone lintel ----
+    for (const kind of [3, 4]) {
+      const P: Part[] = [];
+      const L: Part[] = [];
+      for (let i = 0; i < s.dyn.length; i++) {
+        if (s.dyn[i] !== kind) continue;
+        const { x, z } = cellOf(i);
+        const along = (x > 0 && s.dyn[i - 1] === kind) || (x < s.W - 1 && s.dyn[i + 1] === kind) || !(z > 0 && s.dyn[i - s.W] === kind);
+        const cx = x + 0.5;
+        const cz = z + 0.5;
+        for (let b = 0; b < 4; b++) {
+          const o = -0.375 + b * 0.25;
+          P.push(part(box(along ? 0.06 : 0.07, 0.86, along ? 0.07 : 0.06), 0x3a3a42, cx + (along ? o : 0), 0.45, cz + (along ? 0 : o)));
+          P.push(part(cone(0.05, 0.14, 4), 0x2a2a30, cx + (along ? o : 0), 0.0, cz + (along ? 0 : o), PI));
+        }
+        for (const y of [0.25, 0.6, 0.86]) P.push(part(box(along ? 1 : 0.07, 0.06, along ? 0.07 : 1), 0x4a4a52, cx, y, cz));
+        L.push(part(box(along ? 1.02 : 0.34, 0.22, along ? 0.34 : 1.02), t.wall, cx, 1.18, cz), part(box(along ? 1.04 : 0.38, 0.06, along ? 0.38 : 1.04), t.wallTop, cx, 1.31, cz));
+      }
+      if (!P.length) continue;
+      const g = new THREE.Mesh(merge(P), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.6 }));
+      g.castShadow = true;
+      this.inner.add(g);
+      const lintel = new THREE.Mesh(merge(L), vmat);
+      lintel.castShadow = true;
+      this.inner.add(lintel);
+      this.gates.push({ g, kind, y: 0 });
+    }
+    // ---- boosters: a glow that pulses over the painted pads ----
+    const bq: Part[] = [];
+    for (let i = 0; i < s.boost.length; i++) {
+      if (!s.boost[i]) continue;
+      const { x, z } = cellOf(i);
+      const g = new THREE.PlaneGeometry(0.92, 0.92);
+      g.rotateX(-PI / 2);
+      g.translate(x + 0.5, 0.01, z + 0.5);
+      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(1), 3));
+      bq.push(g);
+    }
+    if (bq.length) {
+      this.boostMat = new THREE.MeshBasicMaterial({ color: glow, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false });
+      const m = new THREE.Mesh(merge(bq), this.boostMat);
+      m.renderOrder = 2;
+      this.inner.add(m);
+    }
+    // ---- ramps: a striped slab rising towards the edge ----
+    const rp: Part[] = [];
+    for (let i = 0; i < s.ramp.length; i++) {
+      const r = s.ramp[i];
+      if (!r) continue;
+      const { x, z } = cellOf(i);
+      const [dx, dz] = r === 1 ? [0, -1] : r === 2 ? [0, 1] : r === 3 ? [-1, 0] : [1, 0];
+      const tilt = 0.17;
+      // rotation: lift the end that faces the edge
+      const rx = dz ? -dz * tilt : 0;
+      const rz = dx ? dx * tilt : 0;
+      rp.push(part(box(0.98, 0.06, 0.98), t.wall, x + 0.5, 0.09, z + 0.5, rx, 0, rz));
+      for (let k = -1; k <= 1; k++) {
+        const ox = dz ? k * 0.3 : 0;
+        const oz = dx ? k * 0.3 : 0;
+        rp.push(part(box(dz ? 0.12 : 0.98, 0.012, dx ? 0.12 : 0.98), 0xffd23a, x + 0.5 + ox, 0.125 + (dx * ox + dz * oz) * tilt, z + 0.5 + oz, rx, 0, rz));
+      }
+      rp.push(part(box(dz ? 0.98 : 0.06, 0.18, dx ? 0.98 : 0.06), hexNum(t.wall, 0.7), x + 0.5 + dx * 0.47, 0.09, z + 0.5 + dz * 0.47));
+    }
+    if (rp.length) {
+      const m = new THREE.Mesh(merge(rp), vmat);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      this.inner.add(m);
+    }
+    // ---- tunnels: a glowing ring and a swirl deep in the hole ----
+    if (s.portals.length) {
+      this.swirlTex = swirlTexture();
+      s.portals.forEach((p, k) => {
+        const c = k < 2 ? glow : 0xff8a3a;
+        const liner = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, PIT, 20, 1, true), new THREE.MeshLambertMaterial({ color: 0x1a1a24, side: THREE.BackSide }));
+        liner.position.set(p.x, -PIT / 2, p.z);
+        const disc = new THREE.Mesh(new THREE.CircleGeometry(0.34, 24), new THREE.MeshBasicMaterial({ map: this.swirlTex, color: c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+        disc.rotation.x = -PI / 2;
+        disc.position.set(p.x, -PIT + 0.03, p.z);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.035, 8, 32), new THREE.MeshBasicMaterial({ color: c }));
+        ring.rotation.x = PI / 2;
+        ring.position.set(p.x, 0.01, p.z);
+        this.inner.add(liner, disc, ring);
+        this.portalDiscs.push(disc);
+      });
+    }
+    // ---- gravity wells: a black hole with a glowing ring, and rings flowing in ----
+    for (const w of s.wells) {
+      const hole = new THREE.Mesh(new THREE.CircleGeometry(0.5, 28), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+      hole.rotation.x = -PI / 2;
+      hole.position.set(w.x, 0.006, w.z);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.06, 8, 40), new THREE.MeshBasicMaterial({ color: glow, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+      ring.rotation.x = PI / 2 - 0.25;
+      ring.position.set(w.x, 0.08, w.z);
+      const pull: THREE.Mesh[] = [];
+      for (let k = 0; k < 3; k++) {
+        const rg = new THREE.Mesh(new THREE.RingGeometry(0.97, 1, 48), new THREE.MeshBasicMaterial({ color: glow, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+        rg.rotation.x = -PI / 2;
+        rg.position.set(w.x, 0.012, w.z);
+        pull.push(rg);
+        this.inner.add(rg);
+      }
+      this.inner.add(hole, ring);
+      this.wellParts.push({ ring, pull });
+    }
+    // ---- coins ----
+    if (s.coins.length) {
+      const cg = new THREE.CylinderGeometry(0.19, 0.19, 0.05, 20);
+      cg.rotateX(PI / 2);
+      const cm = new THREE.MeshStandardMaterial({ color: 0xffc43d, roughness: 0.3, metalness: 0.7, emissive: 0x6a4a00, emissiveIntensity: 0.6 });
+      for (const c of s.coins) {
+        const m = new THREE.Mesh(cg, cm);
+        m.position.set(c.x, 0.32, c.z);
+        m.castShadow = true;
+        this.inner.add(m);
+        this.coinMeshes.push(m);
+      }
+    }
   }
 
   setTier(t: 'high' | 'medium' | 'low') {
@@ -356,13 +567,14 @@ export class LevelView {
     const t = this.theme;
     const depth = -t.outsideY;
     const cupCell = Math.floor(s.cup.z) * s.W + Math.floor(s.cup.x);
+    const pits = new Set<number>([cupCell, ...s.portals.map((p) => Math.floor(p.z) * s.W + Math.floor(p.x))]);
     const P: Part[] = [];
     for (let z = 0; z < s.H; z++)
       for (let x = 0; x < s.W; x++) {
         const i = z * s.W + x;
         const g = s.ground[i];
         if (g === G.Void) continue;
-        const top = g === G.Water || i === cupCell ? -PIT : 0;
+        const top = g === G.Water || pits.has(i) || s.dyn[i] === 2 ? -PIT : 0;
         P.push(part(box(1, 0.14, 1), t.base[0], x + 0.5, top - 0.07, z + 0.5));
         const h = depth + top - 0.14;
         if (h > 0.02) P.push(part(box(1, h, 1), t.base[1], x + 0.5, top - 0.14 - h / 2, z + 0.5));
@@ -456,6 +668,25 @@ export class LevelView {
             case 'magma':
               D.push(part(dode(0.2), t.props[0], px, 0.12, pz, rnd(), rnd(), 0, 1, 0.8, 1));
               break;
+            case 'beach':
+              if (rnd() < 0.5) D.push(part(ico(0.13), 0xffb08a, px, 0.05, pz, 0, rnd(), 0, 1, 0.4, 1));
+              else D.push(part(cone(0.12, 0.2, 5), 0xf4ead2, px, 0.08, pz, PI / 2, rnd() * 3, 0));
+              break;
+            case 'desert':
+              D.push(part(cyl(0.12, 0.17, 0.3, 8), 0xc0703a, px, 0.15, pz), part(cyl(0.07, 0.1, 0.08, 8), 0xa85a2a, px, 0.33, pz));
+              break;
+            case 'castle':
+              D.push(part(cyl(0.16, 0.16, 0.34, 10), 0x7a5230, px, 0.17, pz), part(cyl(0.165, 0.165, 0.04, 10), 0x3a3a3a, px, 0.28, pz));
+              break;
+            case 'city':
+              D.push(part(box(0.5, 0.06, 0.06), c1, px, 0.1, pz, 0, rnd() * 3, 0));
+              break;
+            case 'canyon':
+              D.push(part(dode(0.17), t.props[1], px, 0.08, pz, rnd(), rnd(), 0, 1, 0.7, 1));
+              break;
+            case 'space':
+              D.push(part(cyl(0.03, 0.03, 0.4, 6), 0xd8dce6, px, 0.2, pz), part(ico(0.06), 0xff4a3a, px, 0.42, pz));
+              break;
           }
         }
       }
@@ -476,7 +707,7 @@ export class LevelView {
     const s = this.sim;
     const quads: THREE.BufferGeometry[] = [];
     for (let i = 0; i < s.ground.length; i++) {
-      if (s.ground[i] !== G.Water) continue;
+      if (s.ground[i] !== G.Water && s.dyn[i] !== 2) continue;
       const g = new THREE.PlaneGeometry(1, 1);
       g.rotateX(-PI / 2);
       g.translate((i % s.W) + 0.5, -0.1, Math.floor(i / s.W) + 0.5);
@@ -592,6 +823,26 @@ export class LevelView {
     ctx.arc(cx, cz, s.cupR * PX, 0, PI * 2);
     ctx.fill();
     ctx.restore();
+    // tunnels: a hole with a glowing collar, like the cup
+    s.portals.forEach((p, k) => {
+      const c = k < 2 ? (this.theme.glow ?? 0x36e0ff) : 0xff8a3a;
+      const col = '#' + c.toString(16).padStart(6, '0');
+      const gx = p.x * PX;
+      const gz = p.z * PX;
+      const g = ctx.createRadialGradient(gx, gz, PX * 0.3, gx, gz, PX * 0.55);
+      g.addColorStop(0, col);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(gx, gz, PX * 0.55, 0, PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.arc(gx, gz, PX * 0.34, 0, PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
     // the tee mat
     const tx = s.tee.x * PX;
     const tz = s.tee.z * PX;
@@ -635,6 +886,31 @@ export class LevelView {
         return;
       }
       case G.Green: {
+        const dy = s.dyn[i];
+        // drawbridge: the bridge itself is the surface (water below it)
+        if (dy === 2) {
+          ctx.clearRect(px, pz, PX, PX);
+          return;
+        }
+        if (dy === 1) {
+          // wet sand that the tide covers: darker, with ripple marks
+          ctx.fillStyle = shade(t.sand, 0.8);
+          ctx.fillRect(px, pz, PX, PX);
+          ctx.strokeStyle = shade(t.sand, 0.68);
+          ctx.lineWidth = 1.5;
+          for (let k = 1; k < 5; k++) {
+            ctx.beginPath();
+            ctx.moveTo(px, pz + (k * PX) / 5);
+            for (let u = 0; u <= PX; u += 6) ctx.lineTo(px + u, pz + (k * PX) / 5 + Math.sin((u + x * PX) * 0.25) * 1.5);
+            ctx.stroke();
+          }
+          dots('rgba(255,255,255,0.35)', 5, 2, 2);
+          break;
+        }
+        if (t.floor && t.floor !== 'grass' && t.floor !== 'deck') {
+          this.paintFloor(px, pz, x, z, rnd);
+          break;
+        }
         if (t.surround === 'sea') {
           for (let k = 0; k < 4; k++) {
             ctx.fillStyle = shade(t.green[k % 2], 0.94 + ((x * 7 + k * 3) % 5) * 0.03);
@@ -723,6 +999,124 @@ export class LevelView {
         ctx.stroke();
       }
       ctx.restore();
+    }
+    const glow = '#' + (t.glow ?? 0x36e0ff).toString(16).padStart(6, '0');
+    // boosters: a pad with bright chevrons
+    const bo = s.boost[i];
+    if (bo) {
+      ctx.save();
+      ctx.translate(px + PX / 2, pz + PX / 2);
+      ctx.rotate(bo === 1 ? -PI / 2 : bo === 2 ? PI / 2 : bo === 3 ? PI : 0);
+      ctx.fillStyle = 'rgba(10,10,30,0.75)';
+      ctx.fillRect(-PX / 2 + 3, -PX / 2 + 3, PX - 6, PX - 6);
+      ctx.strokeStyle = glow;
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.shadowColor = glow;
+      ctx.shadowBlur = 8;
+      for (const o of [-12, 0, 12]) {
+        ctx.beginPath();
+        ctx.moveTo(o - 6, -12);
+        ctx.lineTo(o + 6, 0);
+        ctx.lineTo(o - 6, 12);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // portcullis track: a groove across the fairway
+    const dy2 = s.dyn[i];
+    if (dy2 === 3 || dy2 === 4) {
+      const along = (x > 0 && s.dyn[i - 1] === dy2) || (x < s.W - 1 && s.dyn[i + 1] === dy2) || !(z > 0 && s.dyn[i - s.W] === dy2);
+      ctx.fillStyle = 'rgba(30,30,36,0.55)';
+      if (along) ctx.fillRect(px, pz + PX / 2 - 4, PX, 8);
+      else ctx.fillRect(px + PX / 2 - 4, pz, 8, PX);
+    }
+  }
+
+  /** Floors of the new courses: sandstone tiles, a neon carpet, packed red earth, metal plates. */
+  private paintFloor(px: number, pz: number, x: number, z: number, rnd: () => number) {
+    const ctx = this.ctx;
+    const t = this.theme;
+    const base = t.green[(x + z) % 2];
+    ctx.fillStyle = base;
+    ctx.fillRect(px, pz, PX, PX);
+    switch (t.floor) {
+      case 'tiles': {
+        ctx.fillStyle = shade(base, 1.06);
+        ctx.fillRect(px + 2, pz + 2, PX - 4, PX - 4);
+        ctx.strokeStyle = shade(base, 0.72);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px + 1, pz + 1, PX - 2, PX - 2);
+        // a carved glyph now and then
+        if (rnd() < 0.18) {
+          ctx.strokeStyle = shade(base, 0.78);
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          const k = Math.floor(rnd() * 3);
+          if (k === 0) ctx.arc(px + PX / 2, pz + PX / 2, 8, 0, PI * 2);
+          else if (k === 1) {
+            ctx.moveTo(px + PX / 2, pz + 10);
+            ctx.lineTo(px + PX / 2, pz + PX - 10);
+            ctx.moveTo(px + PX / 2 - 8, pz + 18);
+            ctx.lineTo(px + PX / 2 + 8, pz + 18);
+          } else {
+            ctx.moveTo(px + 12, pz + PX - 12);
+            ctx.lineTo(px + PX / 2, pz + 12);
+            ctx.lineTo(px + PX - 12, pz + PX - 12);
+          }
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'carpet': {
+        const glow = '#' + (t.glow ?? 0x36e0ff).toString(16).padStart(6, '0');
+        ctx.fillStyle = 'rgba(255,255,255,0.025)';
+        for (let k = 0; k < 18; k++) ctx.fillRect(px + rnd() * PX, pz + rnd() * PX, 2, 2);
+        ctx.strokeStyle = glow;
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(px + 0.5, pz + 0.5, PX - 1, PX - 1);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'earth': {
+        for (let k = 0; k < 26; k++) {
+          ctx.fillStyle = shade(base, 0.9 + rnd() * 0.18);
+          ctx.fillRect(px + rnd() * PX, pz + rnd() * PX, 3, 2);
+        }
+        if (rnd() < 0.3) {
+          ctx.strokeStyle = shade(base, 0.75);
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          const sx = px + rnd() * PX;
+          const sz = pz + rnd() * PX;
+          ctx.moveTo(sx, sz);
+          ctx.lineTo(sx + (rnd() - 0.5) * 20, sz + (rnd() - 0.5) * 20);
+          ctx.lineTo(sx + (rnd() - 0.5) * 30, sz + (rnd() - 0.5) * 30);
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'plates': {
+        const gr = ctx.createLinearGradient(px, pz, px + PX, pz + PX);
+        gr.addColorStop(0, shade(base, 1.08));
+        gr.addColorStop(1, shade(base, 0.92));
+        ctx.fillStyle = gr;
+        ctx.fillRect(px + 1, pz + 1, PX - 2, PX - 2);
+        ctx.strokeStyle = shade(base, 0.7);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px + 1, pz + 1, PX - 2, PX - 2);
+        ctx.fillStyle = shade(base, 0.6);
+        for (const [a, b] of [
+          [5, 5],
+          [PX - 7, 5],
+          [5, PX - 7],
+          [PX - 7, PX - 7],
+        ])
+          ctx.fillRect(px + a, pz + b, 2.5, 2.5);
+        break;
+      }
     }
   }
 
@@ -893,6 +1287,177 @@ export class LevelView {
           } else P.push(part(dode(0.7 * sc), pick(k % 3), x, y0 + 0.3 * sc, z, k, k * 2, 0, 1, 0.8 + rnd(), 1));
         }
         break;
+      case 'beach': {
+        // the sea beyond the top of the hole, palms, parasols and towels on the sand
+        this.seaTex = rippleTexture('#2fbccc');
+        this.seaTex.repeat.set(40, 20);
+        const sg = new THREE.PlaneGeometry(400, 200);
+        sg.rotateX(-PI / 2);
+        const sea = new THREE.Mesh(sg, new THREE.MeshLambertMaterial({ map: this.seaTex }));
+        sea.position.set(s.W / 2, y0 + 0.03, -7 - 100);
+        this.group.add(sea);
+        P.push(part(box(400, 0.04, 0.6), 0xffffff, s.W / 2, y0 + 0.05, -7));
+        for (let k = 0; k < 16; k++) {
+          const [x, z] = far(2, 14);
+          if (z < -6) continue;
+          const sc = 0.9 + rnd() * 0.6;
+          const lean = (rnd() - 0.5) * 0.5;
+          for (let j = 0; j < 5; j++) P.push(part(cyl(0.11 * sc, 0.14 * sc, 0.62 * sc, 6), j % 2 ? 0x9a7048 : 0x8a6038, x + lean * j * 0.6 * sc, y0 + (0.3 + j * 0.6) * sc, z, 0, 0, -lean * 0.4));
+          const tx = x + lean * 3 * sc;
+          const ty = y0 + 3.2 * sc;
+          for (let j = 0; j < 6; j++) {
+            const a = (j / 6) * PI * 2 + k;
+            P.push(part(box(1.5 * sc, 0.05, 0.35 * sc), pick(j % 2), tx + Math.cos(a) * 0.7 * sc, ty - 0.2, z + Math.sin(a) * 0.7 * sc, 0, -a, -0.35));
+          }
+        }
+        for (let k = 0; k < 9; k++) {
+          const [x, z] = far(1.8, 9);
+          if (z < -6) continue;
+          if (k % 2) {
+            P.push(part(cyl(0.04, 0.04, 1.8, 6), 0xf4f4f0, x, y0 + 0.9, z), part(cone(1.0, 0.45, 10), pick(2 + (k % 3)), x, y0 + 1.85, z));
+          } else P.push(part(box(0.7, 0.03, 1.5), pick(2 + (k % 3)), x, y0 + 0.02, z, 0, rnd() * 2, 0));
+        }
+        break;
+      }
+      case 'desert': {
+        // dunes, sandstone columns (some broken), an obelisk and pyramids far away
+        for (let k = 0; k < 18; k++) {
+          const [x, z] = far(3, 26);
+          P.push(part(ico(2.2 + rnd() * 2.4, 1), 0xe8b46e, x, y0 - 0.6, z, 0, rnd() * 3, 0, 1.6, 0.35, 1));
+        }
+        for (let k = 0; k < 10; k++) {
+          const [x, z] = far(1.6, 7);
+          const h = k % 3 === 0 ? 1.2 + rnd() : 3.2;
+          P.push(part(box(0.9, 0.25, 0.9), 0xd9b07a, x, y0 + 0.12, z), part(cyl(0.32, 0.36, h, 10), 0xe6c08a, x, y0 + 0.25 + h / 2, z));
+          if (h > 3) P.push(part(box(0.95, 0.3, 0.95), 0xd9b07a, x, y0 + 0.25 + h + 0.15, z));
+        }
+        {
+          const [x, z] = [s.W + 4.5, -2];
+          P.push(part(cyl(0.45, 0.8, 6.5, 4), 0xe6c08a, x, y0 + 3.25, z, 0, PI / 4, 0), part(cone(0.5, 0.9, 4), 0xffd23a, x, y0 + 6.95, z, 0, PI / 4, 0));
+        }
+        for (let k = 0; k < 3; k++) P.push(part(cone(9 + k * 3, 8 + k * 2, 4), 0xd8a860, -12 + k * 16, y0 + 4 + k, -38 - k * 6, 0, PI / 4, 0));
+        break;
+      }
+      case 'castle': {
+        // battlements round three sides, towers at the corners, banners
+        const wallC = 0xa8a49a;
+        const ring = (x0: number, z0: number, x1: number, z1: number) => {
+          const len = Math.hypot(x1 - x0, z1 - z0);
+          const n = Math.max(2, Math.round(len / 1.2));
+          for (let k = 0; k < n; k++) {
+            const u = (k + 0.5) / n;
+            const x = x0 + (x1 - x0) * u;
+            const z = z0 + (z1 - z0) * u;
+            const horiz = Math.abs(z1 - z0) < 0.01;
+            P.push(part(box(horiz ? len / n + 0.02 : 1.4, 3, horiz ? 1.4 : len / n + 0.02), wallC, x, y0 + 1.5, z));
+            if (k % 2 === 0) P.push(part(box(horiz ? 0.6 : 1.4, 0.6, horiz ? 1.4 : 0.6), wallC, x, y0 + 3.3, z));
+          }
+        };
+        const m = 4.5;
+        ring(-m, -m, s.W + m, -m);
+        ring(-m, -m, -m, s.H + 2);
+        ring(s.W + m, -m, s.W + m, s.H + 2);
+        for (const [x, z] of [
+          [-m, -m],
+          [s.W + m, -m],
+          [-m, s.H + 2],
+          [s.W + m, s.H + 2],
+        ]) {
+          P.push(part(cyl(1.5, 1.6, 5.5, 12), 0xb8b4aa, x, y0 + 2.75, z), part(cone(1.9, 2.4, 12), pick(2), x, y0 + 6.7, z), part(cyl(0.04, 0.04, 1.2, 6), 0x3a3a3a, x, y0 + 8.4, z), part(box(0.7, 0.4, 0.04), pick(3), x + 0.36, y0 + 8.7, z));
+        }
+        for (let k = 0; k < 10; k++) {
+          const [x, z] = far(1.5, 3.5);
+          if (k % 2) P.push(part(cyl(0.3, 0.3, 0.6, 10), 0x7a5230, x, y0 + 0.3, z));
+          else P.push(part(box(0.6, 0.6, 0.6), 0x8a6a40, x, y0 + 0.3, z));
+        }
+        break;
+      }
+      case 'city': {
+        // dark towers rising from the street far below, lit windows and neon signs
+        const N: Part[] = [];
+        for (let k = 0; k < 38; k++) {
+          const [x, z] = far(2.5, 22);
+          const w = 2 + rnd() * 3;
+          const d = 2 + rnd() * 3;
+          const top = -2.5 + rnd() * 6;
+          const hgt = top - y0;
+          P.push(part(box(w, hgt, d), k % 2 ? 0x1e1a2e : 0x2a2440, x, y0 + hgt / 2, z));
+          const c = pick(k);
+          N.push(part(box(w + 0.05, 0.12, d + 0.05), c, x, top - 0.3, z));
+          if (rnd() < 0.5) N.push(part(box(0.12, hgt * 0.6, d + 0.06), pick(k + 1), x - w / 2, y0 + hgt * 0.55, z));
+          for (let f = 0; f < 5; f++) if (rnd() < 0.55) N.push(part(box(w * 0.7, 0.18, d + 0.04), 0xffe2a0, x, top - 1.2 - f * 1.4, z));
+        }
+        for (let k = 0; k < 3; k++) {
+          const [x, z] = far(1.2, 3);
+          N.push(part(box(1.6, 0.7, 0.08), pick(k), x, 1.2, z), part(box(1.7, 0.08, 0.1), 0x1a1a24, x, 0.8, z));
+          P.push(part(box(0.08, 1.2, 0.08), 0x3a3a4a, x, 0.2, z));
+        }
+        this.group.add(new THREE.Mesh(merge(N), new THREE.MeshBasicMaterial({ vertexColors: true })));
+        for (let k = 0; k < 3; k++) {
+          const l = new THREE.PointLight(pick(k), 12, 16, 1.3);
+          l.position.set(k === 1 ? s.W + 1.5 : -1.5, 2.6, s.H * (0.2 + k * 0.3));
+          this.group.add(l);
+          this.lights.push(l);
+        }
+        break;
+      }
+      case 'canyon': {
+        // mesas of layered red rock, cacti on top, the canyon floor far below
+        for (let k = 0; k < 22; k++) {
+          const [x, z] = far(3, 26);
+          const w = 3 + rnd() * 5;
+          const d = 3 + rnd() * 5;
+          const top = -3 + rnd() * 4.5;
+          const hgt = top - y0;
+          const layers = 3;
+          for (let j = 0; j < layers; j++) {
+            const h = hgt / layers;
+            P.push(part(box(w * (1 - j * 0.06), h, d * (1 - j * 0.06)), j % 2 ? 0xb45a34 : 0xc8703e, x, y0 + h * (j + 0.5), z));
+          }
+          if (rnd() < 0.6) P.push(part(cyl(0.18, 0.2, 1.2, 8), 0x3a8a4a, x, top + 0.6, z), part(cyl(0.12, 0.12, 0.5, 8), 0x3a8a4a, x + 0.3, top + 0.8, z, 0, 0, -0.9));
+        }
+        for (let k = 0; k < 8; k++) {
+          const [x, z] = far(0.8, 2.4);
+          P.push(part(cyl(0.12, 0.14, 0.8, 8), 0x3a8a4a, x, 0.0, z), part(cyl(0.08, 0.08, 0.35, 8), 0x3a8a4a, x + 0.18, 0.15, z, 0, 0, -1));
+        }
+        break;
+      }
+      case 'space': {
+        // grey dust with craters, a domed base, the Earth in a sky full of stars
+        for (let k = 0; k < 24; k++) {
+          const [x, z] = far(2, 26);
+          const r = 0.8 + rnd() * 2.4;
+          P.push(part(cyl(r, r * 1.1, 0.15, 16), 0x6e7078, x, y0 + 0.02, z), part(cyl(r * 0.8, r * 0.8, 0.06, 16), 0x5a5c64, x, y0 + 0.1, z));
+        }
+        for (let k = 0; k < 16; k++) {
+          const [x, z] = far(1.5, 18);
+          P.push(part(dode(0.4 + rnd() * 0.9), pick(k % 2), x, y0 + 0.2, z, k, k, 0, 1, 0.6, 1));
+        }
+        {
+          const bx = -6;
+          const bz = -4;
+          P.push(part(new THREE.SphereGeometry(3, 16, 8, 0, PI * 2, 0, PI / 2), 0xd8dce6, bx, y0, bz), part(cyl(3.05, 3.05, 0.4, 16), 0x9aa0b0, bx, y0 + 0.2, bz));
+          P.push(part(cyl(0.08, 0.08, 4, 6), 0xd8dce6, s.W + 4, y0 + 2, -3), part(new THREE.SphereGeometry(0.9, 12, 6, 0, PI * 2, 0, PI / 2), 0xd8dce6, s.W + 4, y0 + 4.2, -3, PI * 0.75));
+        }
+        const earth = new THREE.Mesh(new THREE.IcosahedronGeometry(7, 2), new THREE.MeshLambertMaterial({ color: 0x2a6ad8, emissive: 0x0a1a4a, fog: false }));
+        earth.position.set(s.W / 2 + 34, 26, -70);
+        const land = new THREE.Mesh(merge([part(ico(3.2, 1), 0x3aa85a, -2, 2.6, 5.3), part(ico(2.4, 1), 0x3aa85a, 3, -1.5, 5.6), part(ico(2.6, 1), 0xffffff, 0, 6.4, 1.5, 0, 0, 0, 1.2, 0.5, 1)]), new THREE.MeshLambertMaterial({ vertexColors: true, fog: false }));
+        land.position.copy(earth.position);
+        this.group.add(earth, land);
+        const pts = new Float32Array(700 * 3);
+        const r2 = lcg(99);
+        for (let k = 0; k < 700; k++) {
+          const a = r2() * PI * 2;
+          const e = r2() * 0.9 + 0.05;
+          pts[k * 3] = s.W / 2 + Math.cos(a) * Math.cos(e) * 150;
+          pts[k * 3 + 1] = Math.sin(e) * 150;
+          pts[k * 3 + 2] = s.H / 2 + Math.sin(a) * Math.cos(e) * 150;
+        }
+        const sg = new THREE.BufferGeometry();
+        sg.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+        this.group.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, fog: false })));
+        break;
+      }
       case 'magma': {
         for (let k = 0; k < 30; k++) {
           const [x, z] = far(1.5, 18);
@@ -987,6 +1552,41 @@ export class LevelView {
       const u = Math.max(0, 1 - (s.time - p.hit) / 0.3);
       const w = Math.sin(u * PI * 3) * u;
       this.bumpers[k].scale.set(1 + w * 0.22, 1 - w * 0.18, 1 + w * 0.22);
+    });
+    // ---- the new courses' moving parts ----
+    if (this.tideMesh) {
+      const up = s.def.tide?.up ?? 0.45;
+      const u = s.cycle(1, s.time);
+      // full while the tide is in; it starts creeping up just before (a warning), and drains at the end
+      const L = u < up ? (u > up - 0.05 ? (up - u) / 0.05 : 1) : u > 0.9 ? ((u - 0.9) / 0.1) * 0.8 : 0;
+      this.tideMesh.position.y = -0.05 + L * 0.08;
+      (this.tideMesh.material as THREE.MeshLambertMaterial).opacity = L * 0.88;
+      this.tideTex!.offset.set(time * 0.05, time * 0.03);
+    }
+    if (this.bridge) {
+      const target = s.floodUp(2, s.time) ? 1 : 0;
+      this.bridgeL += (target - this.bridgeL) * Math.min(1, dt * 7);
+      this.bridge.position.y = this.bridgeL * 0.85;
+    }
+    for (const gt of this.gates) {
+      const target = s.gateDown(gt.kind, s.time) ? 0 : 0.95;
+      gt.y += (target - gt.y) * Math.min(1, dt * 16);
+      gt.g.position.y = gt.y;
+    }
+    if (this.boostMat) this.boostMat.opacity = 0.22 + Math.sin(time * 7) * 0.12;
+    for (const d of this.portalDiscs) d.rotation.z -= dt * 3;
+    for (const w of this.wellParts) {
+      w.ring.rotation.z += dt * 2.5;
+      w.pull.forEach((rg, k) => {
+        const u = 1 - ((time * 0.45 + k / 3) % 1);
+        rg.scale.setScalar(0.6 + u * 2);
+        (rg.material as THREE.MeshBasicMaterial).opacity = 0.32 * (1 - u) * u * 4 * 0.5;
+      });
+    }
+    this.coinMeshes.forEach((m, k) => {
+      m.visible = !s.coinsGot.includes(k);
+      m.rotation.y = time * 2.4 + k;
+      m.position.y = 0.32 + Math.sin(time * 3 + k) * 0.05;
     });
     // ---- liquids ----
     if (this.waterTex) this.waterTex.offset.set(time * 0.04, time * 0.025);
@@ -1161,6 +1761,7 @@ export class LevelView {
         break;
       }
       case 'water':
+      case 'flood':
         for (let k = 0; k < 18; k++) this.puffs.add({ x, y: 0.05, z, vy: 2 + Math.random() * 2.5, vx: (Math.random() - 0.5) * 2, vz: (Math.random() - 0.5) * 2, grav: 9, life: 0.7, s0: 0.12, s1: 0.06, r: 0.75, g: 0.9, b: 1, a: 0.9 });
         for (let k = 0; k < 2; k++) this.puffs.add({ x, y: -0.05, z, life: 0.8, s0: 0.2, s1: 1.4, r: 1, g: 1, b: 1, a: 0.5 });
         break;
@@ -1174,6 +1775,35 @@ export class LevelView {
         break;
       case 'lavaRise':
         this.shake = Math.max(this.shake, 0.15);
+        break;
+      case 'portal': {
+        const c = new THREE.Color((ev.n ?? 0) < 2 ? (this.theme.glow ?? 0x36e0ff) : 0xff8a3a);
+        this.burst(x, 0.15, z, 12, c.r, c.g, c.b, 2, 0.4);
+        const o = s.portals[(ev.n ?? 0) ^ 1];
+        if (o) this.burst(o.x, 0.15, o.z, 12, c.r, c.g, c.b, 2, 0.4);
+        // (the ball jumps straight to the other tunnel: no sliding across the hole)
+        this.shown.x = s.ball.x;
+        this.shown.z = s.ball.z;
+        break;
+      }
+      case 'boost': {
+        const c = new THREE.Color(this.theme.glow ?? 0x36e0ff);
+        this.burst(x, 0.1, z, 10, c.r, c.g, c.b, 2.5, 0.35);
+        this.squash = 0.6;
+        this.squashDir = Math.atan2(s.ball.vz, s.ball.vx);
+        break;
+      }
+      case 'jump':
+        for (let k = 0; k < 8; k++) this.puffs.add({ x, y: 0.1, z, vy: 0.6, vx: (Math.random() - 0.5) * 1.2, vz: (Math.random() - 0.5) * 1.2, life: 0.5, s0: 0.12, s1: 0.35, r: 0.95, g: 0.85, b: 0.7, a: 0.5, drag: 2 });
+        break;
+      case 'land':
+        for (let k = 0; k < 10; k++) this.puffs.add({ x, y: 0.05, z, vy: 0.5, vx: (Math.random() - 0.5) * 1.6, vz: (Math.random() - 0.5) * 1.6, life: 0.5, s0: 0.1, s1: 0.35, r: 0.95, g: 0.9, b: 0.8, a: 0.5, drag: 2 });
+        this.squash = 1;
+        this.squashDir = Math.atan2(s.ball.vz, s.ball.vx);
+        this.shake = Math.max(this.shake, 0.08);
+        break;
+      case 'coin':
+        this.burst(x, 0.35, z, 16, 1, 0.82, 0.25, 2.2, 0.5);
         break;
     }
   }
@@ -1200,6 +1830,8 @@ export class LevelView {
     this.waterTex?.dispose();
     this.seaTex?.dispose();
     this.lavaTex?.dispose();
+    this.tideTex?.dispose();
+    this.swirlTex?.dispose();
     this.group.traverse((o) => {
       const m = o as THREE.Mesh;
       m.geometry?.dispose();

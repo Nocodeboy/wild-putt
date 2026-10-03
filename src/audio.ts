@@ -115,15 +115,32 @@ export class Audio {
     if (!c) return;
     const t = c.currentTime;
     const gust = 0.5 + 0.5 * Math.sin(t * 0.37) * Math.sin(t * 0.11);
-    const cfg: Record<string, [number, number]> = { lawn: [0.03, 450], street: [0.05, 300], sea: [0.09, 700], fairground: [0.04, 900], ice: [0.08, 1200], magma: [0.1, 140] };
+    const cfg: Record<string, [number, number]> = {
+      lawn: [0.03, 450],
+      street: [0.05, 300],
+      sea: [0.09, 700],
+      fairground: [0.04, 900],
+      ice: [0.08, 1200],
+      magma: [0.1, 140],
+      beach: [0.08, 600],
+      desert: [0.07, 1100],
+      castle: [0.03, 500],
+      city: [0.05, 220],
+      canyon: [0.09, 900],
+      space: [0.02, 160],
+    };
     const [g, f] = cfg[kind] ?? cfg.lawn;
-    const swell = kind === 'sea' ? 0.5 + 0.5 * Math.sin(t * 0.8) : gust;
+    const swell = kind === 'sea' || kind === 'beach' ? 0.5 + 0.5 * Math.sin(t * 0.8) : gust;
     this.windGain.gain.setTargetAtTime(g * (0.6 + swell * 0.8), t, 0.5);
     this.windFilter.frequency.setTargetAtTime(f * (0.7 + swell * 0.6), t, 0.5);
     this.birdT -= dt;
     if (this.birdT <= 0) {
       this.birdT = 1.5 + Math.random() * 4;
-      if (kind === 'lawn') this.bird();
+      if (kind === 'lawn' || kind === 'castle') this.bird();
+      else if (kind === 'beach' && Math.random() < 0.5) {
+        this.tone(1400, 0.25, 'sawtooth', 0.02, 0, 1900);
+        this.tone(1900, 0.3, 'sawtooth', 0.018, 0.22, 1200);
+      } else if (kind === 'space' && Math.random() < 0.4) this.tone(1200 + Math.random() * 800, 0.08, 'sine', 0.012, 0, 1600)
       else if (kind === 'sea' && Math.random() < 0.6) {
         // a gull
         this.tone(1400, 0.25, 'sawtooth', 0.02, 0, 1900);
@@ -268,6 +285,29 @@ export class Audio {
         break;
       case 'tick':
         this.tone(1500, 0.04, 'square', 0.04);
+        break;
+      case 'lose':
+        [392, 349, 311].forEach((f, i) => this.tone(f, i === 2 ? 0.5 : 0.18, 'triangle', 0.09, i * 0.16));
+        break;
+      case 'portal':
+        this.tone(300, 0.35, 'sine', 0.1, 0, 1400);
+        this.tone(1400, 0.3, 'triangle', 0.05, 0.18, 500);
+        break;
+      case 'boost':
+        if (!this.limit('boost', 0.15)) return;
+        this.tone(220, 0.3, 'sawtooth', 0.06, 0, 880);
+        this.noiseBurst(0.25, 'bandpass', 2400, 4000, 0.08, 1);
+        break;
+      case 'jump':
+        this.tone(330, 0.25, 'triangle', 0.08, 0, 660);
+        break;
+      case 'land':
+        this.tone(110, 0.15, 'sine', 0.18, 0, 70);
+        this.noiseBurst(0.15, 'lowpass', 900, 300, 0.12);
+        break;
+      case 'coin':
+        this.tone(1319, 0.08, 'square', 0.06);
+        this.tone(1976, 0.25, 'square', 0.06, 0.07);
         break;
     }
   }

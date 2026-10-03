@@ -677,6 +677,31 @@ function handleEvent(ev: SimEvent) {
     case 'maxed':
       audio.play('groan');
       break;
+    case 'portal':
+      audio.play('portal');
+      if (vib) vibrate(12);
+      break;
+    case 'boost':
+      audio.play('boost');
+      if (vib) vibrate(12);
+      break;
+    case 'jump':
+      audio.play('jump');
+      break;
+    case 'land':
+      audio.play('land');
+      if (vib) vibrate(18);
+      break;
+    case 'flood':
+      audio.play('water');
+      floater(t('tFlood'), ev.x, 1, ev.z, 'bad');
+      if (vib) vibrate([30, 30, 40]);
+      break;
+    case 'coin':
+      audio.play('coin');
+      floater('+5', ev.x, 0.8, ev.z, 'good');
+      if (vib) vibrate(8);
+      break;
     case 'rest':
       aimCamera();
       if (s.strokes === s.maxStrokes - 1 && !flags.lastStroke) {

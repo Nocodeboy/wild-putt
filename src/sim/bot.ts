@@ -47,49 +47,7 @@ export class Bot {
       s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
       return s / 4294967296;
     };
-    this.dist = this.field();
-  }
-
-  /** Walking distance from every cell to the cup (8 neighbours; sand costs more; hazards and walls blocked). */
-  private field(): Float32Array {
-    const s = this.sim;
-    const N = s.W * s.H;
-    const d = new Float32Array(N).fill(1e9);
-    const done = new Uint8Array(N);
-    const start = Math.floor(s.cup.z) * s.W + Math.floor(s.cup.x);
-    d[start] = 0;
-    const open = (i: number) => {
-      const g = s.ground[i];
-      return g === G.Green || g === G.Sand || g === G.Ice;
-    };
-    // small grids: a simple O(N²) Dijkstra is plenty
-    for (;;) {
-      let u = -1;
-      let bd = 1e9;
-      for (let i = 0; i < N; i++)
-        if (!done[i] && d[i] < bd) {
-          bd = d[i];
-          u = i;
-        }
-      if (u < 0) break;
-      done[u] = 1;
-      const x = u % s.W;
-      const z = (u - x) / s.W;
-      for (let dz = -1; dz <= 1; dz++)
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dz) continue;
-          const nx = x + dx;
-          const nz = z + dz;
-          if (nx < 0 || nz < 0 || nx >= s.W || nz >= s.H) continue;
-          const j = nz * s.W + nx;
-          if (!open(j)) continue;
-          // no cutting corners past walls
-          if (dx && dz && (!open(z * s.W + nx) || !open(nz * s.W + x))) continue;
-          const c = (dx && dz ? 1.414 : 1) * (s.ground[j] === G.Sand ? 1.8 : 1);
-          if (d[u] + c < d[j]) d[j] = d[u] + c;
-        }
-    }
-    return d;
+    this.dist = sim.pathField();
   }
 
   private value(x: number, z: number): number {
@@ -109,6 +67,9 @@ export class Bot {
     if (r.out === 'sunk') return -100 + c.p; // softest putt that drops
     if (r.out === 'water' || r.out === 'void' || r.out === 'lava') return this.value(this.fromX, this.fromZ) + 2.5;
     if (r.out === 'timeout') return this.value(r.x, r.z) + 1;
+    // resting where the tide or the drawbridge comes up, or on a moving part: risky
+    const ri = Math.floor(r.z) * s.W + Math.floor(r.x);
+    if (s.dyn[ri]) return this.value(r.x, r.z) + (s.dyn[ri] <= 2 ? 1.6 : 0.4);
     // lava that will spread over the resting point next stroke
     if (s.lavaDist && s.def.lavaRise) {
       const i = Math.floor(r.z) * s.W + Math.floor(r.x);

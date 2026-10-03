@@ -82,8 +82,13 @@ export interface Ball {
   z: number;
   vx: number;
   vz: number;
-  y: number; // only for the visual drop into the cup / into a hazard
+  y: number; // only for the visual drop into the cup / into a hazard, and the arc of a jump
   state: BallState;
+  /** canyon / moon ramps: flight time left and the whole flight (s) */
+  air?: number;
+  airDur?: number;
+  /** temple tunnels: the tunnel the ball just came out of (ignored until it rolls clear) */
+  lock?: number;
 }
 
 export type SimEventType =
@@ -100,6 +105,12 @@ export type SimEventType =
   | 'sand'
   | 'lavaRise'
   | 'rest'
+  | 'portal' // n = tunnel the ball went into
+  | 'boost' // n = speed after the boost
+  | 'jump' // n = flight time
+  | 'land'
+  | 'flood' // the tide (or the drawbridge) caught the resting ball
+  | 'coin' // n = coin index
   | 'maxed'; // ran out of strokes: picked up
 
 export interface SimEvent {
