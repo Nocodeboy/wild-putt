@@ -165,7 +165,7 @@ Las monedas solo compran bolas (aspecto) y la línea de tiro más larga, que no 
 
 | Sitio | Estado | Falta |
 |---|---|---|
-| Repositorio | Commits locales; `Nocodeboy/wild-putt` **no existe todavía** | Que Germán lo cree (privado, vacío) y hago el push |
+| Repositorio | Subido a `Nocodeboy/wild-putt` (privado) el 4 oct 2026 | — |
 | Web | Build lista (`dist/web`) | OK de Germán para crear el proyecto en Vercel y desplegar |
 | CrazyGames | Zip, portadas y vídeos listos | OK para subirlo y aceptar los términos del portal |
 | Google Play | Proyecto de Android listo, APK de debug compilado, gráficos de la ficha hechos | AdMob, clave de subida, crear la app en Play Console y OK para enviar a revisión |

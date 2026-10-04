@@ -34,7 +34,7 @@ Germán aprobó la 0.2.0 («Este sí que pasa el corte») y pidió la versión d
 - **0.1.0:** física de la bola, hoyos vivos (barco que se inclina, lava que avanza), 6 recorridos de 3 hoyos, reto diario, bot, tarjeta de puntuación y compartir sin spoilers, música con IA y efectos sintetizados.
 
 ### Pendiente, en este orden
-1. **Germán:** crear el repositorio privado vacío `Nocodeboy/wild-putt` (hago el push), jugar 5 minutos a la 1.0.0 y dar el OK para publicar.
+1. **Germán:** jugar 5 minutos a la 1.0.0 y dar el OK para publicar. (El repositorio privado `Nocodeboy/wild-putt` ya está creado y subido.)
 2. **Web** en Vercel y **CrazyGames** (Basic Launch, sin anuncios): con su OK.
 3. **Google Play:** AdMob (app y dos bloques), clave de subida, crear la app en Play Console y enviar a revisión con su OK.
 4. Añadir *Wild Putt* a los «More games» de los otros juegos y a la página del estudio.
