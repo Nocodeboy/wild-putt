@@ -3,7 +3,8 @@
 //   dist/crazygames/     CrazyGames upload (zip): their SDK, no external links
 //   dist/android/        web assets of the Android app (Capacitor copies them into android/: npx cap sync android)
 //   dist/artifact.html   page content for the Claude artifact: analytics off (CSP), share link
-// Usage: node build.mjs [--dev]   (GAME_URL env overrides the public URL)
+// Usage: node build.mjs [--dev] [--web]   (GAME_URL env overrides the public URL; --web, or building on Vercel,
+// makes only dist/web: Vercel's build image has no zip or ffmpeg)
 import { build } from 'esbuild';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -14,6 +15,7 @@ const GAME_URL = process.env.GAME_URL ?? 'https://wild-putt.vercel.app';
 // CrazyGames shows no ads during Basic Launch and rejects games whose rewarded buttons do nothing, so the
 // CrazyGames build ships without ad buttons unless CG_ADS=1 (turn it on once the game reaches Full Launch).
 const CG_ADS = process.env.CG_ADS === '1';
+const WEB_ONLY = !!process.env.VERCEL || process.argv.includes('--web');
 // Supabase project shared by the studio's games (nocodeboy-games); the publishable key is public by design.
 const ANALYTICS = { url: 'https://xshxfaospajlgwrnivvq.supabase.co', key: 'sb_publishable_GfwGUNaIh924_4oNIIqoZw_ellp8wGm' };
 const music = {};
@@ -187,7 +189,7 @@ const kb = (n) => (n / 1024).toFixed(0) + ' KB';
 }
 
 // ---------- CrazyGames ----------
-{
+if (!WEB_ONLY) {
   const out = 'dist/crazygames';
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
@@ -217,7 +219,7 @@ function androidAdsCheck() {
   if (process.env.RELEASE === '1' && testAppId) return { error: `RELEASE=1 but AndroidManifest.xml still has Google's test AdMob app id (${TEST_APP_ID})` };
   return { testAds, testAppId };
 }
-{
+if (!WEB_ONLY) {
   const out = 'dist/android';
   rmSync(out, { recursive: true, force: true });
   const ads = androidAdsCheck();
@@ -251,7 +253,7 @@ function androidAdsCheck() {
 }
 
 // ---------- Claude artifact ----------
-{
+if (!WEB_ONLY) {
   const js = await bundle('artifact', GAME_URL);
   const artifact = `<title>${NAME}</title>
 <meta name="description" content="${DESC}">

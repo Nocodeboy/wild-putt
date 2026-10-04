@@ -26,10 +26,10 @@ import type { AdProvider, IapProvider, PaidPurchase, Product, ProductId, Provide
 // and are safe to tap. Never tap your own real ads (AdMob can suspend the account): use TEST_DEVICE_IDS instead.
 // =====================================================================================================================
 export const ADMOB_CONFIG = {
-  USE_TEST_ADS: true,
+  USE_TEST_ADS: false,
   REAL_AD_UNITS: {
-    rewarded: '', // AdMob › Wild Putt › android_rewarded (to be created: docs/publicar.md §4)
-    interstitial: '', // AdMob › Wild Putt › android_interstitial
+    rewarded: 'ca-app-pub-7807308787501735/5217320546', // AdMob › Wild Putt › android_rewarded
+    interstitial: 'ca-app-pub-7807308787501735/1478134512', // AdMob › Wild Putt › android_interstitial
   },
   /** Hashed ids of your own phones (Logcat prints them on the first ad request). They get test ads even with the
    *  real units, and they are the only devices where DEBUG_CONSENT_IN_EEA applies. */

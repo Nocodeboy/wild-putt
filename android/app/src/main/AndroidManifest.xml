@@ -38,7 +38,7 @@
              src/monetize/android.ts (ADMOB_CONFIG); build.mjs and app/build.gradle refuse a release with Google's test id. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-7807308787501735~7953052680" />
     </application>
 
     <!-- Permissions -->
