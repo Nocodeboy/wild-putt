@@ -9,7 +9,7 @@
 
 Lo técnico (estructura, comandos, Android, controles, cómo se hace un hoyo) está en el [README principal](../README.md).
 
-## Estado (3 oct 2026) · Fase 4: 1.0.0 lista para publicar
+## Estado (4 oct 2026) · Fase 4: 1.0.0 en revisión en Google Play
 
 Germán aprobó la 0.2.0 («Este sí que pasa el corte») y pidió la versión de producción con el patrón de la casa. La 1.0.0 lo tiene todo; falta el OK para publicar y las cuentas que solo puede crear él ([publicar.md](publicar.md) §4 y §6).
 
@@ -34,8 +34,7 @@ Germán aprobó la 0.2.0 («Este sí que pasa el corte») y pidió la versión d
 - **0.1.0:** física de la bola, hoyos vivos (barco que se inclina, lava que avanza), 6 recorridos de 3 hoyos, reto diario, bot, tarjeta de puntuación y compartir sin spoilers, música con IA y efectos sintetizados.
 
 ### Pendiente, en este orden
-1. **Germán:** jugar 5 minutos a la 1.0.0 y dar el OK para publicar. (El repositorio privado `Nocodeboy/wild-putt` ya está creado y subido.)
-2. **Web** en Vercel y **CrazyGames** (Basic Launch, sin anuncios): con su OK.
-3. **Google Play:** AdMob (app y dos bloques), clave de subida, crear la app en Play Console y enviar a revisión con su OK.
-4. Añadir *Wild Putt* a los «More games» de los otros juegos y a la página del estudio.
-5. Medir con personas: embudo de los primeros hoyos, golpes frente a par y uso del mulligan.
+1. **Google Play:** enviada a revisión el 4 oct 2026 ([publicar.md](publicar.md) §6). Web publicada en https://wild-putt.vercel.app.
+2. **CrazyGames** (Basic Launch, sin anuncios): con el OK de Germán.
+3. Cuando Play la apruebe: vincular la app de AdMob a la tienda y añadir *Wild Putt* a los «More games» de los otros juegos y a la página del estudio.
+4. Medir con personas: embudo de los primeros hoyos, golpes frente a par y uso del mulligan.

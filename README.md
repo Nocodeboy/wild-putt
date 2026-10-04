@@ -44,15 +44,15 @@ Requisitos: Node 22 o superior. Para imágenes, vídeos y pruebas, Python 3 con 
 | `npm run bot` | El bot juega cada hoyo de la gira y saca la media de golpes contra el par |
 | `npm run route-table` | Elige el diseño y mide el par de los 120 hoyos (largo) |
 | `npm run daily-table` | Regenera las semillas del reto diario (después de tocar la física o los hoyos) |
-| `npm run deploy:web` | Publica la web en Vercel (proyecto `wild-putt`) |
+| `npm run deploy:web` | Publica la web en Vercel con la CLI (normalmente no hace falta: el proyecto `wild-putt` está conectado al repositorio y cada push a `main` se publica solo con `node build.mjs --web`) |
 | `npm run android:sync` | Compila y copia la web al proyecto de Android |
 | `npm run android:assets` | Icono, splash y gráficos de la ficha de Play |
 
 ## Android
 
 `npm run android:sync` y, en `android/`, `./gradlew assembleDebug` (APK de prueba con anuncios de prueba) o `./gradlew bundleRelease` (AAB firmado). Para la release:
-- `android/keystore.properties` con la clave de subida (fuera de git, copia en `NO-COMPARTIR\wildputt`).
-- Ids reales de AdMob en `src/monetize/android.ts` (`REAL_AD_UNITS`, `USE_TEST_ADS = false`) y en el manifest. `RELEASE=1 node build.mjs` se niega a compilar con los de prueba.
+- `android/keystore.properties` y `android/keystore/wildputt-upload.jks` con la clave de subida (fuera de git; copia en `NO-COMPARTIR\wild-putt`, con instrucciones en su `LEEME.txt`).
+- Ids reales de AdMob en `src/monetize/android.ts` (`REAL_AD_UNITS`, `USE_TEST_ADS = false`) y en el manifest (ya puestos desde la 1.0.0). `RELEASE=1 node build.mjs` se niega a compilar con los de prueba.
 - `versionCode` = 10000 × mayor + 100 × menor + parche (1.0.0 → 10000).
 
 ## Controles

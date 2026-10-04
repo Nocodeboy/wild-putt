@@ -1,6 +1,6 @@
 # Publicar en la web, CrazyGames y Google Play
 
-Preparado el 3 oct 2026 para la **1.0.0**. Todo lo que hay que pegar en los formularios está aquí, **en inglés primero** (idioma principal del estudio) y después en español. **Nada está publicado todavía:** cada paso irreversible (desplegar, aceptar términos, enviar a revisión, crear productos) espera el OK de Germán. Estado: §6.
+Preparado el 3 oct 2026 para la **1.0.0**. Todo lo que hay que pegar en los formularios está aquí, **en inglés primero** (idioma principal del estudio) y después en español. **Web publicada y Google Play enviada a revisión el 4 oct 2026** con el OK de Germán; CrazyGames sigue esperando su OK. Estado: §6.
 
 ## 0. Público: 13+
 
@@ -79,7 +79,7 @@ CrazyGames rechazó *Round ’Em Up!* y *Tray Runner* el 2 oct por «calidad»: 
 ### Lo que tiene que hacer Germán antes (cuentas y claves)
 
 1. **AdMob:** crear la app *Wild Putt* (Android, sin publicar todavía) con dos bloques: `android_rewarded` (con recompensa) y `android_interstitial` (intersticial). Pegar el id de la app en `android/app/src/main/AndroidManifest.xml` y los dos bloques en `REAL_AD_UNITS` de `src/monetize/android.ts`, y poner `USE_TEST_ADS = false` (o pasarme los ids y lo hago yo). Añadir la app al mensaje de consentimiento europeo (UMP) con la política de privacidad.
-2. **Clave de subida:** `keytool -genkeypair -v -keystore wildputt-upload.jks -alias wildputt -keyalg RSA -keysize 2048 -validity 10000`, guardada en `NO-COMPARTIR\wildputt` con su `keystore.properties`. Nunca en git (`.gitignore` ya la excluye).
+2. **Clave de subida:** hecha el 4 oct 2026 (`wildputt-upload.jks`, alias `upload`, RSA 2048, 10.000 días), guardada en `NO-COMPARTIR\wild-putt` con su `keystore.properties` (`storeFile=../keystore/wildputt-upload.jks`). Nunca en git (`.gitignore` ya la excluye).
 3. **Play Console:** crear la app (pido permiso para cada casilla legal).
 
 ### Productos (los mismos que *Round ’Em Up!*)
@@ -161,12 +161,30 @@ Las monedas solo compran bolas (aspecto) y la línea de tiro más larga, que no 
 - Cuando cada juego esté en producción en Play, `playLive: true` en `src/crosspromo.ts`.
 - Enlaces en redes siempre con `utm_*` (ver `docs/datos.md` del estudio).
 
-## 6. Estado (3 oct 2026, 1.0.0)
+## 6. Estado (4 oct 2026, 1.0.0)
 
-| Sitio | Estado | Falta |
+| Sitio | Estado | Datos |
 |---|---|---|
-| Repositorio | Subido a `Nocodeboy/wild-putt` (privado) el 4 oct 2026 | — |
-| Web | Build lista (`dist/web`) | OK de Germán para crear el proyecto en Vercel y desplegar |
+| Repositorio | `Nocodeboy/wild-putt` (privado) | — |
+| Web | **Publicada** en https://wild-putt.vercel.app (4 oct 2026) | Proyecto `wild-putt` en Vercel (equipo *nocodeboy's projects*), **conectado al repositorio**: cada push a `main` se publica solo (`vercel.json` en la raíz, `node build.mjs --web`). `/privacidad` y `/app-ads.txt` en línea |
 | CrazyGames | Zip, portadas y vídeos listos | OK para subirlo y aceptar los términos del portal |
-| Google Play | Proyecto de Android listo, APK de debug compilado, gráficos de la ficha hechos | AdMob, clave de subida, crear la app en Play Console y OK para enviar a revisión |
+| Google Play | **Enviada a revisión** el 4 oct 2026 (Google tarda hasta 7 días; publicación gestionada desactivada, así que sale sola al aprobarse) | App *Wild Putt: Mini Golf Tour* (id `4975510067456388227`), juego gratuito, `com.nocodeboy.wildputt` |
 | Analítica | Fila `wildputt` creada en Supabase | — |
+
+### Google Play, hecho (4 oct 2026, con el OK de Germán)
+
+- App creada con las casillas de políticas y de exportación.
+- Declaraciones: política de privacidad (`https://wild-putt.vercel.app/privacidad`), acceso (todo sin restricciones), anuncios (sí), ID de publicidad (sí: analítica, publicidad y prevención de fraude), apps gubernamentales (no), funciones financieras (ninguna), salud (ninguna), público objetivo 13-15, 16-17 y 18+, y clasificación IARC (PEGI 3, ESRB Everyone, USK 0, IARC 3+, ClassInd 14 por las compras; «Incluye compras»).
+- Seguridad de los datos, igual que *Round ’Em Up!*: ubicación aproximada, interacciones en la app e IDs de dispositivo (recogidos y compartidos; analítica, publicidad y fraude), registros de fallos y diagnóstico (recogidos y compartidos; analítica), historial de compras (recogido, opcional; analítica). Cifrado en tránsito, sin cuentas.
+- Ficha en inglés (predeterminada) y traducciones es-ES y es-419 (§4), icono, gráfico de cabecera y seis capturas de móvil (`assets/play/`; la de neón primero). Categoría *Deportes*, correo `ghptiemblo@gmail.com` y web `https://wild-putt.vercel.app`.
+- Versión de producción **10000 (1.0.0)**, lanzamiento completo en 177 países y el resto del mundo, notas en inglés. AAB firmado con la clave de subida (huella SHA-256 `BE:4D:03:97:C2:42:B0:D6:19:A7:05:B2:EB:EE:E3:27:BA:E3:36:81:2A:01:90:D1:EE:41:14:2C:25:D1:AA:B1`). Única advertencia: sin archivo de desofuscación (no se usa R8), como en los otros juegos.
+- Los cinco productos activos con la opción de compra `buy` y precio base en USD (los demás países, convertidos por Google): `remove_ads` 2,99 $ (*No ads*), `starter_pack` 1,99 $ (*Starter pack*), `coins_s` 0,99 $ (*Bag of coins*), `coins_m` 4,99 $ (*Sack of coins*), `coins_l` 9,99 $ (*Chest of coins*).
+- AdMob: app *Wild Putt* (`ca-app-pub-7807308787501735~7953052680`), bloques `android_rewarded` (`…/5217320546`) y `android_interstitial` (`…/1478134512`), y la app añadida al mensaje de consentimiento europeo con su política de privacidad. `USE_TEST_ADS = false`.
+- Clave de subida en `NO-COMPARTIR\wild-putt` (`wildputt-upload.jks`, alias `upload`, con su `keystore.properties` y `LEEME.txt`). AAB en `publicacion\wild-putt\google-play\wild-putt-1.0.0.aab`.
+
+### Google Play, pendiente
+
+- Esperar la revisión. Si Google pide cambios, llega un correo y aparece en el Resumen de publicación.
+- AdMob: cuando la app esté publicada, vincularla a Google Play en AdMob (*Añadir tienda*) para que pase la revisión de AdMob y sirva anuncios sin límite.
+- Cuando esté publicada: `playLive: true` en los `src/crosspromo.ts` de los otros juegos y en la página del estudio (§5).
+- Capturas de tableta (opcionales): se pueden añadir las mismas seis para tabletas de 7 y 10 pulgadas.
