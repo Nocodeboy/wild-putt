@@ -9,9 +9,13 @@
 
 Lo técnico (estructura, comandos, Android, controles, cómo se hace un hoyo) está en el [README principal](../README.md).
 
-## Estado (4 oct 2026) · Fase 4: 1.0.0 en revisión en Google Play
+## Estado
 
-Germán aprobó la 0.2.0 («Este sí que pasa el corte») y pidió la versión de producción con el patrón de la casa. La 1.0.0 lo tiene todo; falta el OK para publicar y las cuentas que solo puede crear él ([publicar.md](publicar.md) §4 y §6).
+**El estado actual (Google Play, CrazyGames, web y lo pendiente) está en [`nocodeboy-games/docs/versiones.md`](https://github.com/Nocodeboy/nocodeboy-games/blob/main/docs/versiones.md)**, la única fuente del estudio. Aquí queda la historia de cómo se hizo y las decisiones; los detalles de cada envío a las tiendas, en [publicar.md](publicar.md).
+
+## Cómo se llegó a la 1.0.0
+
+Germán aprobó la 0.2.0 («Este sí que pasa el corte») y pidió la versión de producción con el patrón de la casa. Envío a las tiendas, en [publicar.md](publicar.md) §4 y §6.
 
 ### 1.0.0: la gira
 - **12 recorridos, 120 hoyos.** A los 6 del prototipo se suman playa (marea que inunda la arena), templo del sol (túneles), castillo (rastrillos y puente levadizo), ciudad de neón (aceleradores), cañón (rampas y saltos) y base lunar (gravedad baja y pozos de gravedad con agujero negro). Cada uno con su suelo, barandillas, entorno, ambiente y un hoyo de presentación hecho a mano que enseña la mecánica.
@@ -32,9 +36,3 @@ Germán aprobó la 0.2.0 («Este sí que pasa el corte») y pidió la versión d
 ### Antes (prototipo)
 - **0.2.0:** cámara de seguimiento con vuelo de presentación y vista general, tirachinas relativo a la cámara con barra de fuerza y zona de cancelar, barandillas finas, hoyo hundido, agua y lava animadas, putter animado, bandera y fundidos.
 - **0.1.0:** física de la bola, hoyos vivos (barco que se inclina, lava que avanza), 6 recorridos de 3 hoyos, reto diario, bot, tarjeta de puntuación y compartir sin spoilers, música con IA y efectos sintetizados.
-
-### Pendiente, en este orden
-1. **Google Play:** enviada a revisión el 4 oct 2026 ([publicar.md](publicar.md) §6). Web publicada en https://wild-putt.vercel.app.
-2. **CrazyGames** (Basic Launch, sin anuncios): con el OK de Germán.
-3. Cuando Play la apruebe: vincular la app de AdMob a la tienda y añadir *Wild Putt* a los «More games» de los otros juegos y a la página del estudio.
-4. Medir con personas: embudo de los primeros hoyos, golpes frente a par y uso del mulligan.
