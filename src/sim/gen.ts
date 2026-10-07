@@ -423,7 +423,9 @@ function pool(c: Ctx, ch: string) {
   if (!p) return;
   const [dx, dz] = DIRS[p.s.dir];
   const side = c.r.next() < 0.5 ? 1 : -1;
-  const cells = across(p.s, p.x, p.z);
+  // (on a round green the stretch is narrower than its box: the edge is the last carved cell)
+  const cells = across(p.s, p.x, p.z).filter(([x, z]) => c.b.cv.carved(x, z));
+  if (!cells.length) return;
   const edge = side > 0 ? cells[cells.length - 1] : cells[0];
   const nx = dz === 0 ? 0 : side;
   const nz = dz === 0 ? side : 0;
@@ -432,10 +434,10 @@ function pool(c: Ctx, ch: string) {
     const x = edge[0] + dx * i;
     const z = edge[1] + dz * i;
     // the pool takes the outermost lane (and one more cell out, so the fairway does not get narrower)
+    if (!free(c.b, x, z, 1)) continue;
     for (const k of [0, 1]) {
       const xx = x + nx * k;
       const zz = z + nz * k;
-      if (k === 0 && !free(c.b, xx, zz, 1)) continue;
       if (k === 1 && (c.b.cv.carved(xx, zz) || c.b.cv.get(xx, zz) !== ' ')) continue;
       c.b.cv.set(xx, zz, ch);
       if (k === 1) c.b.cv.seg[zz * SIZE + xx] = p.seg;
@@ -533,7 +535,8 @@ function trySpinner(c: Ctx): boolean {
 function mover(c: Ctx) {
   const p = spot(c, 0.25, 0.8, 4);
   if (!p) return;
-  const cells = across(p.s, p.x, p.z);
+  const cells = across(p.s, p.x, p.z).filter(([x, z]) => c.b.cv.carved(x, z));
+  if (cells.length < 3) return;
   const horizSeg = DIRS[p.s.dir][1] === 0;
   const a = cells[0];
   const b = cells[cells.length - 1];
