@@ -42,22 +42,11 @@ export const COURSES: CourseDef[] = [
       }),
       h({
         id: 'g3',
-        name: { es: 'El seto', en: 'The Hedge' },
+        name: { es: 'El molino', en: 'The Windmill' },
+        tip: { es: 'Espera a que las aspas dejen libre la puerta y pasa por dentro del molino.', en: 'Wait for the sails to clear the door, then putt right through the windmill.' },
         par: 3,
-        map: [
-          '#########',
-          '#::.O.::#',
-          '#.......#',
-          '#.......#',
-          '#..###..#',
-          '#..###..#',
-          '#..###..#',
-          '#.......#',
-          '#.......#',
-          '#.......#',
-          '#...T...#',
-          '#########',
-        ],
+        mills: [{ speed: 1.0 }],
+        map: ['#########', '#:..O..:#', '#.......#', '#.......#', '####W####', '#.......#', '#.......#', '#.......#', '#...T...#', '#########'],
       }),
     ],
   },
@@ -144,7 +133,7 @@ export const COURSES: CourseDef[] = [
     holes: [
       h({
         id: 'f1',
-        name: { es: 'El molino', en: 'The Windmill' },
+        name: { es: 'El molinete', en: 'The Pinwheel' },
         par: 2,
         spinners: [{ len: 2.5, speed: 1.3 }],
         map: ['#########', '#...O...#', '#.......#', '#.......#', '#.......#', '#...S...#', '#.......#', '#.......#', '#.......#', '#...T...#', '#########'],
@@ -157,7 +146,7 @@ export const COURSES: CourseDef[] = [
       }),
       h({
         id: 'f3',
-        name: { es: 'Doble molino', en: 'Double Mill' },
+        name: { es: 'Doble molinete', en: 'Double Pinwheel' },
         par: 3,
         spinners: [
           { len: 1.9, speed: 1.6 },

@@ -1,9 +1,11 @@
 import { hashString, Rng } from './rng';
-import type { HoleDef, MoverDef, SpinnerDef, ThemeId } from './types';
+import type { HoleDef, MillDef, MoverDef, SpinnerDef, ThemeId } from './types';
 
 // Hole generator (docs/diseno-v2.md §5.3). A hole is a fairway carved from a template (straight, dogleg, S-bend,
-// U-turn, zigzag, open room, fork round an island, cup on an island), walled in, then dressed with the general
-// obstacles and with its course's own mechanic. Everything comes from the seed, so every device builds the same hole.
+// U-turn, zigzag, open room, fork round an island, cup on an island, and the curved ones: a sweeping bend, a snake,
+// a hairpin, a round green), walled in, then dressed with the general obstacles, its course's own mechanic and the
+// classics of minigolf (windmills, loops, mounds, pipes, bridges, jumps). Everything comes from the seed, so every
+// device builds the same hole. The walls are drawn on the grid; the game smooths them into curves (shape.ts).
 // tools/route-table.ts plays every generated hole with the bot to pick a fair one and measure its par.
 
 export interface GenOpts {
@@ -25,10 +27,12 @@ export interface GenHole {
   bridge?: HoleDef['bridge'];
   gravity?: number;
   coins?: [number, number][];
+  hills?: [number, number, number, number][];
+  mills?: MillDef[];
   template: Template;
 }
 
-export type Template = 'straight' | 'dogleg' | 'sbend' | 'uturn' | 'zigzag' | 'room' | 'fork' | 'island';
+export type Template = 'straight' | 'dogleg' | 'sbend' | 'uturn' | 'zigzag' | 'room' | 'fork' | 'island' | 'curve' | 'snake' | 'hook' | 'round';
 
 const MAX_W = 15;
 const MAX_H = 26;
@@ -41,7 +45,7 @@ const DIRS: [number, number][] = [
 ];
 
 /** Ground that the ball can roll on (and rest on). */
-const OPEN = new Set(['.', ':', '_', '^', 'v', '<', '>', 'O', 'T', 'w', 'P', '8', '2', '4', '6', 'J', 'G', 'H', '=']);
+const OPEN = new Set(['.', ':', '_', '^', 'v', '<', '>', 'O', 'T', 'w', 'P', '8', '2', '4', '6', 'J', 'G', 'H', '=', 'b', 'W', 'Q']);
 const HAZARD = new Set([' ', '~', 'L', 'w']);
 
 /** The hazard that lines a course's pools, pits and islands. */
@@ -92,6 +96,8 @@ interface Seg {
   bz: number;
   dir: number;
   w: number;
+  /** a quarter circle round (cx, cz) instead of a straight stretch (no features on it) */
+  arc?: { cx: number; cz: number; R: number };
 }
 
 interface Built {
@@ -130,6 +136,32 @@ function layout(r: Rng, tpl: Template, d: number, champ: boolean): Built | null 
   const sx = Math.floor(SIZE / 2);
   const sz = SIZE - 6;
 
+  if (tpl === 'round') {
+    // a round (or oval) green
+    const rx = r.range(3.6, 5.2);
+    const rz = Math.min(r.range(4.4, 6.6) + (champ ? 1.2 : 0), 8.5);
+    const cx = sx;
+    const cz = sz - Math.round(rz);
+    let x0 = SIZE;
+    let x1 = 0;
+    let z0 = SIZE;
+    let z1 = 0;
+    for (let z = 0; z < SIZE; z++)
+      for (let x = 0; x < SIZE; x++) {
+        if (((x - cx) / (rx + 0.5)) ** 2 + ((z - cz) / (rz + 0.5)) ** 2 > 1) continue;
+        cv.set(x, z, '.');
+        cv.seg[z * SIZE + x] = 0;
+        x0 = Math.min(x0, x);
+        x1 = Math.max(x1, x);
+        z0 = Math.min(z0, z);
+        z1 = Math.max(z1, z);
+      }
+    const tee = { x: cx + r.int(-1, 1), z: z1 - 1 };
+    const cup = r.next() < 0.4 ? { x: cx, z: cz - r.int(0, 1) } : { x: cx + r.int(-2, 2), z: z0 + 2 };
+    segs.push({ ax: tee.x, az: tee.z, bx: tee.x, bz: z0, dir: 0, w: x1 - x0 + 1 });
+    return { cv, segs, tee, cup, template: tpl, room: { x0, z0, x1, z1 } };
+  }
+
   if (tpl === 'room' || tpl === 'fork' || tpl === 'island') {
     const W = tpl === 'room' ? r.int(7, 11) : r.int(9, 11);
     const H = tpl === 'room' ? r.int(10, 15) + (champ ? 3 : 0) : r.int(12, 16) + (champ ? 2 : 0);
@@ -147,9 +179,9 @@ function layout(r: Rng, tpl: Template, d: number, champ: boolean): Built | null 
     return { cv, segs, tee: { x: teeX, z: sz - 1 }, cup: { x: cupX, z: cupZ }, template: tpl, room: { x0, z0, x1: x0 + W - 1, z1: sz } };
   }
 
-  // corridors: a turtle walk
+  // corridors: a turtle walk (an arc turns a quarter circle of radius R towards `dir`)
   const turn = r.next() < 0.5 ? 1 : 3;
-  const plan: { dir: number; len: number }[] = [];
+  const plan: { dir: number; len: number; R?: number }[] = [];
   // longer stretches further into the tour
   const L = (a: number, b: number) => r.int(a, b) + Math.round(3 * Math.min(1, d)) + (champ ? 2 : 0);
   switch (tpl) {
@@ -172,14 +204,73 @@ function layout(r: Rng, tpl: Template, d: number, champ: boolean): Built | null 
       if (champ || r.next() < 0.4) plan.push({ dir: 0, len: r.int(3, 5) });
       break;
     }
+    case 'curve': {
+      // a long sweeping bend
+      const R = r.int(3, 5);
+      plan.push({ dir: 0, len: L(3, 7) }, { dir: turn, len: 0, R }, { dir: turn, len: r.int(2, 5) + (champ ? 2 : 0) });
+      break;
+    }
+    case 'snake': {
+      // left-right: two quarter circles the opposite way round
+      const R = r.int(2, 3);
+      plan.push({ dir: 0, len: L(2, 5) }, { dir: turn, len: 0, R }, { dir: 0, len: 0, R }, { dir: 0, len: r.int(2, 4) });
+      if (champ || r.next() < 0.35) plan.push({ dir: (turn + 2) % 4, len: 0, R }, { dir: 0, len: 0, R }, { dir: 0, len: r.int(1, 3) });
+      break;
+    }
+    case 'hook': {
+      // a hairpin: up, round a half circle, and back down beside the way in
+      const R = r.int(3, 4);
+      plan.push({ dir: 0, len: L(5, 8) }, { dir: turn, len: 0, R }, { dir: 2, len: 0, R }, { dir: 2, len: r.int(2, 4) });
+      break;
+    }
   }
   let x = sx;
   let z = sz - 1;
+  let heading = 0;
+  const curved = plan.some((p) => p.R);
+  // (curves keep one odd width all the way, so the lanes line up through the bends)
+  const oddW = baseW % 2 ? baseW : baseW - 1;
   for (let k = 0; k < plan.length; k++) {
     const p = plan[k];
+    if (p.R) {
+      // a quarter circle from the current heading to p.dir
+      const R = p.R;
+      const w = oddW;
+      const [ex, ez] = DIRS[p.dir];
+      const [hx, hz] = DIRS[heading];
+      const cx = x + ex * R;
+      const cz = z + ez * R;
+      const bx = cx + hx * R;
+      const bz = cz + hz * R;
+      const cells: [number, number][] = [];
+      for (let zz = Math.min(z, bz) - w; zz <= Math.max(z, bz) + w; zz++)
+        for (let xx = Math.min(x, bx) - w; xx <= Math.max(x, bx) + w; xx++) {
+          const vx = xx - cx;
+          const vz = zz - cz;
+          if (vx * (x - cx) + vz * (z - cz) < -0.3 || vx * (bx - cx) + vz * (bz - cz) < -0.3) continue;
+          if (Math.abs(Math.hypot(vx, vz) - R) > w / 2) continue;
+          cells.push([xx, zz]);
+        }
+      for (const [xx, zz] of cells)
+        for (let z2 = zz - 1; z2 <= zz + 1; z2++)
+          for (let x2 = xx - 1; x2 <= xx + 1; x2++) {
+            if (!cv.in(x2, z2) || x2 < 1 || z2 < 1 || x2 >= SIZE - 1 || z2 >= SIZE - 1) return null;
+            const o = cv.seg[z2 * SIZE + x2];
+            if (o >= 0 && o < k - 1) return null;
+          }
+      for (const [xx, zz] of cells) {
+        cv.set(xx, zz, '.');
+        if (cv.seg[zz * SIZE + xx] < 0) cv.seg[zz * SIZE + xx] = k;
+      }
+      segs.push({ ax: x, az: z, bx, bz, dir: heading, w, arc: { cx, cz, R } });
+      x = bx;
+      z = bz;
+      heading = p.dir;
+      continue;
+    }
     const [dx, dz] = DIRS[p.dir];
     // corridors are a little narrower or wider from one stretch to the next
-    const w = Math.max(3, Math.min(6, baseW + (k > 0 && r.next() < 0.35 ? (r.next() < 0.5 ? -1 : 1) : 0)));
+    const w = curved ? oddW : Math.max(3, Math.min(6, baseW + (k > 0 && r.next() < 0.35 ? (r.next() < 0.5 ? -1 : 1) : 0)));
     const s: Seg = { ax: x, az: z, bx: x + dx * p.len, bz: z + dz * p.len, dir: p.dir, w };
     const first = k === 0;
     const last = k === plan.length - 1;
@@ -199,6 +290,7 @@ function layout(r: Rng, tpl: Template, d: number, champ: boolean): Built | null 
     segs.push(s);
     x = s.bx;
     z = s.bz;
+    heading = p.dir;
   }
   return { cv, segs, tee: { x: sx, z: sz - 1 }, cup: { x, z }, template: tpl };
 }
@@ -209,6 +301,19 @@ function line(b: Built): { x: number; z: number; seg: number; t: number }[] {
   const out: { x: number; z: number; seg: number; t: number }[] = [];
   let t = 0;
   b.segs.forEach((s, k) => {
+    if (s.arc) {
+      const { cx, cz, R } = s.arc;
+      const a0 = Math.atan2(s.az - cz, s.ax - cx);
+      let a1 = Math.atan2(s.bz - cz, s.bx - cx);
+      if (a1 - a0 > Math.PI) a1 -= Math.PI * 2;
+      if (a0 - a1 > Math.PI) a1 += Math.PI * 2;
+      const n = Math.max(2, Math.round((R * Math.PI) / 2));
+      for (let i = 1; i <= n; i++) {
+        const a = a0 + ((a1 - a0) * i) / n;
+        out.push({ x: Math.round(cx + Math.cos(a) * R), z: Math.round(cz + Math.sin(a) * R), seg: k, t: t++ });
+      }
+      return;
+    }
     const [dx, dz] = DIRS[s.dir];
     const n = Math.abs(s.bx - s.ax) + Math.abs(s.bz - s.az);
     for (let i = k === 0 ? 0 : 1; i <= n; i++) {
@@ -246,6 +351,8 @@ interface Ctx {
   champ: boolean;
   spinners: { x: number; z: number; s: SpinnerDef }[];
   movers: MoverDef[];
+  mills: { x: number; z: number; m: MillDef }[];
+  hills: [number, number, number, number][];
   pts: ReturnType<typeof line>;
   out: GenHole;
 }
@@ -253,7 +360,7 @@ interface Ctx {
 /** A point on the centre line between fractions a and b of the way, on a straight stretch of width ≥ minW. */
 function spot(c: Ctx, a: number, b: number, minW = 3): (ReturnType<typeof line>[number] & { s: Seg }) | null {
   const n = c.pts.length;
-  const cand = c.pts.filter((p) => p.t >= a * n && p.t <= b * n && c.b.segs[p.seg].w >= minW && !near(c.b.tee, p.x, p.z, 2) && !near(c.b.cup, p.x, p.z, 2));
+  const cand = c.pts.filter((p) => p.t >= a * n && p.t <= b * n && !c.b.segs[p.seg].arc && c.b.segs[p.seg].w >= minW && !near(c.b.tee, p.x, p.z, 2) && !near(c.b.cup, p.x, p.z, 2));
   // not on the corner cells of a turn
   const ok = cand.filter((p) => {
     const s = c.b.segs[p.seg];
@@ -371,7 +478,7 @@ function hasAround(c: Ctx, x: number, z: number, ch: string, r = 1) {
 
 /** Take away the railing on one side of a straight stretch (the ball can roll off). */
 function openEdge(c: Ctx) {
-  const ok = c.b.segs.map((s, k) => ({ s, k })).filter(({ s }) => Math.abs(s.bx - s.ax) + Math.abs(s.bz - s.az) >= 4);
+  const ok = c.b.segs.map((s, k) => ({ s, k })).filter(({ s }) => !s.arc && Math.abs(s.bx - s.ax) + Math.abs(s.bz - s.az) >= 4);
   if (!ok.length) return;
   const { s, k } = c.r.pick(ok);
   const side = c.r.next() < 0.5 ? 1 : -1;
@@ -610,11 +717,172 @@ function well(c: Ctx) {
   if (free(c.b, x, z, 2) && !hasAround(c, x, z, 'M', 3)) c.b.cv.set(x, z, 'M');
 }
 
+// ---------- the classics of minigolf ----------
+/** A row right across a straight stretch with one way through in the middle: a windmill's door or a loop. */
+function gateway(c: Ctx, ch: 'W' | 'Q', a: number, b: number): boolean {
+  for (let k = 0; k < 8; k++) {
+    const p = spot(c, a, b, 3);
+    if (!p || p.s.w > 5) continue;
+    // well clear of the bends: the ball comes in and goes out straight
+    const need = Math.ceil(p.s.w / 2) + 1;
+    const fromA = Math.abs(p.x - p.s.ax) + Math.abs(p.z - p.s.az);
+    const toB = Math.abs(p.x - p.s.bx) + Math.abs(p.z - p.s.bz);
+    if ((p.seg > 0 && fromA < need) || (p.seg < c.b.segs.length - 1 && toB < need)) continue;
+    const [dx, dz] = DIRS[p.s.dir];
+    const row = across(p.s, p.x, p.z);
+    // plain green on the row and on both sides of it
+    if (![...row, ...across(p.s, p.x - dx, p.z - dz), ...across(p.s, p.x + dx, p.z + dz)].every(([x, z]) => free(c.b, x, z, 1))) continue;
+    const mid = Math.floor((row.length - 1) / 2) + (row.length % 2 === 0 && c.r.next() < 0.5 ? 1 : 0);
+    row.forEach(([x, z], i) => c.b.cv.set(x, z, i === mid ? ch : '#'));
+    if (ch === 'W') {
+      const [x, z] = row[mid];
+      c.mills.push({ x, z, m: { speed: Math.round(c.r.range(0.85, 1.2 + 0.3 * Math.min(1, c.d)) * 100) / 100 * (c.r.next() < 0.5 ? 1 : -1), phase: Math.round(c.r.range(0, Math.PI) * 100) / 100 } });
+    }
+    return true;
+  }
+  return false;
+}
+
+/** A windmill standing on an open green: through its door, or the long way round. */
+function millInRoom(c: Ctx): boolean {
+  const rm = c.b.room;
+  if (!rm) return false;
+  for (let k = 0; k < 10; k++) {
+    const x = c.r.int(rm.x0 + 2, rm.x1 - 2);
+    const z = c.r.int(rm.z0 + 3, rm.z1 - 3);
+    let ok = true;
+    for (let zz = z - 1; zz <= z + 1 && ok; zz++) for (let xx = x - 2; xx <= x + 2; xx++) if (!free(c.b, xx, zz, 2)) ok = false;
+    if (!ok || near(c.b.tee, x, z, 3) || near(c.b.cup, x, z, 3)) continue;
+    c.b.cv.set(x - 1, z, '#');
+    c.b.cv.set(x, z, 'W');
+    c.b.cv.set(x + 1, z, '#');
+    c.mills.push({ x, z, m: { speed: Math.round(c.r.range(0.85, 1.25) * 100) / 100 * (c.r.next() < 0.5 ? 1 : -1), phase: Math.round(c.r.range(0, Math.PI) * 100) / 100 } });
+    return true;
+  }
+  return false;
+}
+
+/** A stream right across a straight stretch, crossed by a narrow wooden bridge with rails. */
+function bridgeOver(c: Ctx): boolean {
+  const p = spot(c, 0.3, 0.75, 3);
+  if (!p) return false;
+  const [dx, dz] = DIRS[p.s.dir];
+  const rows = c.r.next() < 0.6 ? 2 : 1;
+  const cells: [number, number][][] = [];
+  for (let k = 0; k < rows; k++) cells.push(across(p.s, p.x + dx * k, p.z + dz * k));
+  if (!cells.flat().every(([x, z]) => free(c.b, x, z, 1))) return false;
+  const n = cells[0].length;
+  const g = c.r.int(0, n - 1);
+  const wide = n >= 5 && c.d < 0.5 && c.r.next() < 0.5 ? 2 : 1;
+  for (const row of cells) row.forEach(([x, z], i) => c.b.cv.set(x, z, i >= g && i < g + wide ? 'b' : '~'));
+  return true;
+}
+
+/** A stream right across a straight stretch with a row of ramps before it: jump it. */
+function jumpOver(c: Ctx): boolean {
+  const p = spot(c, 0.3, 0.7, 3);
+  if (!p) return false;
+  const [dx, dz] = DIRS[p.s.dir];
+  const s = p.s;
+  const toB = Math.abs(p.x - s.bx) + Math.abs(p.z - s.bz);
+  if (toB < 4 && p.seg !== c.b.segs.length - 1) return false;
+  const ramp = across(s, p.x - dx, p.z - dz);
+  const water = [across(s, p.x, p.z), across(s, p.x + dx, p.z + dz)];
+  if (![...ramp, ...water.flat()].every(([x, z]) => free(c.b, x, z, 1))) return false;
+  for (const [x, z] of ramp) c.b.cv.set(x, z, 'J');
+  for (const row of water) for (const [x, z] of row) c.b.cv.set(x, z, '~');
+  return true;
+}
+
+/** Mounds on the green, where there is room all round them (in canvas cells: x, z, radius, height). */
+function mounds(c: Ctx, n: number) {
+  for (let k = 0, made = 0; k < 12 && made < n; k++) {
+    const roomy = c.b.room;
+    let x: number;
+    let z: number;
+    if (roomy) {
+      x = c.r.int(roomy.x0 + 1, roomy.x1 - 1);
+      z = c.r.int(roomy.z0 + 2, roomy.z1 - 2);
+    } else {
+      const p = spot(c, 0.15, 0.85, 3);
+      if (!p) return;
+      const cells = across(p.s, p.x, p.z);
+      [x, z] = cells[Math.floor(cells.length / 2)];
+    }
+    const r = Math.round(c.r.range(1.1, 1.6) * 10) / 10;
+    if (!roomOf(c, x + 0.5, z + 0.5, r + 0.45, false)) continue;
+    if (c.hills.some(([hx, hz, hr]) => Math.hypot(hx - x - 0.5, hz - z - 0.5) < hr + r + 0.4)) continue;
+    c.hills.push([x + 0.5, z + 0.5, r, Math.round(c.r.range(0.26, 0.4) * 100) / 100]);
+    made++;
+  }
+}
+
+/** The cup on top of a mound (the volcano). */
+function cupMound(c: Ctx): boolean {
+  const cup = c.b.cup;
+  const r = 1.8;
+  if (!roomOf(c, cup.x + 0.5, cup.z + 0.5, r + 0.4, true)) return false;
+  c.hills.push([cup.x + 0.5, cup.z + 0.5, r, 0.38]);
+  return true;
+}
+
+/** All the cells within `rad` of (x, z) are plain carved green (the cup allowed if `cup`). */
+function roomOf(c: Ctx, x: number, z: number, rad: number, cup: boolean): boolean {
+  for (let zz = Math.floor(z - rad); zz <= Math.floor(z + rad); zz++)
+    for (let xx = Math.floor(x - rad); xx <= Math.floor(x + rad); xx++) {
+      if (Math.hypot(xx + 0.5 - x, zz + 0.5 - z) > rad) continue;
+      if (!c.b.cv.carved(xx, zz)) return false;
+      const ch = c.b.cv.get(xx, zz);
+      if (ch === '.') continue;
+      if (cup && xx === c.b.cup.x && zz === c.b.cup.z) continue;
+      return false;
+    }
+  if (!cup && (near(c.b.tee, Math.floor(x), Math.floor(z), Math.ceil(rad)) || near(c.b.cup, Math.floor(x), Math.floor(z), Math.ceil(rad)))) return false;
+  return true;
+}
+
+/** Each course's share of the classics: [windmill, loop, bridge, jump, mounds, cup on a mound, pipes]. */
+const CLASSIC: Record<ThemeId, [number, number, number, number, number, number, number]> = {
+  garden: [0.55, 0, 0.4, 0.15, 0.45, 0.1, 0.2],
+  roofs: [0.1, 0.3, 0, 0, 0.3, 0.05, 0.3],
+  ship: [0.2, 0.25, 0, 0, 0.3, 0.05, 0.25],
+  fair: [0.45, 0.55, 0, 0, 0.35, 0.1, 0.3],
+  glacier: [0.2, 0.1, 0.4, 0.15, 0.5, 0.1, 0.25],
+  volcano: [0.1, 0.1, 0, 0, 0.4, 0.5, 0.15],
+  beach: [0.25, 0, 0.4, 0.3, 0.5, 0.1, 0.1],
+  temple: [0.15, 0.25, 0, 0, 0.4, 0.1, 0],
+  castle: [0.3, 0.2, 0.3, 0, 0.25, 0.05, 0.1],
+  neon: [0.1, 0.55, 0, 0, 0.3, 0.1, 0.3],
+  canyon: [0.1, 0.2, 0, 0, 0.45, 0.1, 0.3],
+  moon: [0, 0.35, 0, 0, 0.5, 0.2, 0.1],
+};
+
+function classics(c: Ctx) {
+  const { r, d, course } = c;
+  const [mill, loop, bridge, jump, hills, cupHill, pipes] = CLASSIC[course];
+  const more = c.champ ? 1.5 : 1;
+  // one big piece at most: the windmill, the loop, a bridge or a jump over a stream
+  const big: [number, () => boolean][] = [
+    [d >= 0.08 ? mill : 0, () => (c.b.room ? millInRoom(c) : gateway(c, 'W', 0.15, 0.8))],
+    [d >= 0.22 ? loop : 0, () => gateway(c, 'Q', 0.15, 0.65)],
+    [d >= 0.15 ? bridge : 0, () => bridgeOver(c)],
+    [d >= 0.3 ? jump : 0, () => jumpOver(c)],
+  ];
+  for (let i = big.length - 1; i > 0; i--) {
+    const j = r.int(0, i);
+    [big[i], big[j]] = [big[j], big[i]];
+  }
+  for (const [pr, fn] of big) if (pr > 0 && r.next() < pr * more && fn()) break;
+  if (r.next() < cupHill * more) cupMound(c);
+  if (r.next() < hills * more) mounds(c, c.b.room ? r.int(1, 3) : r.int(1, 2));
+  if (pipes && r.next() < pipes) tunnels(c, false);
+}
+
 // ---------- the course's own mechanic and dressing ----------
 function dress(c: Ctx) {
   const { r, d, course } = c;
   const tpl = c.b.template;
-  const roomy = tpl === 'room' || tpl === 'fork' || tpl === 'island';
+  const roomy = tpl === 'room' || tpl === 'fork' || tpl === 'island' || tpl === 'round';
   if (tpl === 'fork') fork(c);
   if (tpl === 'island') island(c);
   if (roomy) roomStuff(c);
@@ -721,6 +989,7 @@ function dress(c: Ctx) {
     if (!roomy) block(c, 0.15, 0.5);
     if (course === 'garden' || course === 'glacier') sand(c);
   }
+  classics(c);
 }
 
 // ---------- assembling and checking ----------
@@ -736,6 +1005,39 @@ function walls(b: Built, course: ThemeId) {
       if (touch) out.push([x, z]);
     }
   for (const [x, z] of out) cv.set(x, z, '#');
+  // pockets of nothing shut in by the walls (inside a hairpin, between the legs of a U) are solid too
+  const seen = new Uint8Array(SIZE * SIZE);
+  const q: number[] = [];
+  for (let i = 0; i < SIZE; i++) for (const [x, z] of [[i, 0], [i, SIZE - 1], [0, i], [SIZE - 1, i]]) q.push(z * SIZE + x);
+  while (q.length) {
+    const i = q.pop()!;
+    if (seen[i]) continue;
+    const x = i % SIZE;
+    const z = (i - x) / SIZE;
+    if (cv.get(x, z) !== ' ' || (cv.carved(x, z) && cv.seg[i] >= 0)) continue;
+    seen[i] = 1;
+    if (x > 0) q.push(i - 1);
+    if (x < SIZE - 1) q.push(i + 1);
+    if (z > 0) q.push(i - SIZE);
+    if (z < SIZE - 1) q.push(i + SIZE);
+  }
+  for (let z = 1; z < SIZE - 1; z++)
+    for (let x = 1; x < SIZE - 1; x++) {
+      const i = z * SIZE + x;
+      if (!seen[i] && cv.get(x, z) === ' ' && !cv.carved(x, z) && cv.seg[i] !== -2) cv.set(x, z, '#');
+    }
+  // and so are narrow slots between walls (inside a hairpin)
+  const solid = (x: number, z: number) => cv.get(x, z) === '#';
+  const fillIn: [number, number][] = [];
+  for (let z = 1; z < SIZE - 1; z++)
+    for (let x = 1; x < SIZE - 1; x++) {
+      const i = z * SIZE + x;
+      if (cv.get(x, z) !== ' ' || cv.carved(x, z) || cv.seg[i] === -2) continue;
+      const lr = [1, 2, 3].some((k) => solid(x - k, z)) && [1, 2, 3].some((k) => solid(x + k, z));
+      const ud = [1, 2, 3].some((k) => solid(x, z - k)) && [1, 2, 3].some((k) => solid(x, z + k));
+      if (lr || ud) fillIn.push([x, z]);
+    }
+  for (const [x, z] of fillIn) cv.set(x, z, '#');
   void course;
 }
 
@@ -808,10 +1110,10 @@ export function connected(map: string[]): boolean {
     // ramps: a jump over up to 4 cells of void in the ramp's direction
     if (at(x, z) === 'J')
       for (const [dx, dz] of DIRS)
-        if (at(x + dx, z + dz) === ' ')
+        if (at(x + dx, z + dz) === ' ' || at(x + dx, z + dz) === '~')
           for (let k = 2; k <= 5; k++) {
             const ch = at(x + dx * k, z + dz * k);
-            if (ch !== ' ') {
+            if (ch !== ' ' && ch !== '~') {
               if (walk(ch)) next.push([x + dx * k, z + dz * k]);
               break;
             }
@@ -878,6 +1180,10 @@ const TEMPLATES: { t: Template; w: (d: number, champ: boolean) => number }[] = [
   { t: 'room', w: (d) => (d < 0.2 ? 0.8 : 1.3) },
   { t: 'fork', w: (d) => (d < 0.35 ? 0 : 0.8) },
   { t: 'island', w: (d) => (d < 0.4 ? 0 : 0.7) },
+  { t: 'curve', w: () => 1.8 },
+  { t: 'snake', w: (d) => (d < 0.12 ? 0.5 : 1.3) },
+  { t: 'hook', w: (d) => (d < 0.25 ? 0 : 1) },
+  { t: 'round', w: (d) => (d < 0.15 ? 0.6 : 1) },
 ];
 
 /** Build the hole for a seed; tries further sub-seeds until a valid one comes out. */
@@ -886,7 +1192,7 @@ export function generate(o: GenOpts): GenHole {
   for (let attempt = 0; attempt < 200; attempt++) {
     const r = new Rng(hashString(`${o.course}/${o.seed}/${attempt}`));
     // (a canyon hole needs a straight stretch for its gap: no open rooms there)
-    const pool = TEMPLATES.map((x) => ({ t: x.t, w: x.w(d, !!o.champ) })).filter((x) => x.w > 0 && !(o.course === 'canyon' && (x.t === 'room' || x.t === 'fork' || x.t === 'island')));
+    const pool = TEMPLATES.map((x) => ({ t: x.t, w: x.w(d, !!o.champ) })).filter((x) => x.w > 0 && !(o.course === 'canyon' && (x.t === 'room' || x.t === 'fork' || x.t === 'island' || x.t === 'round')));
     let pickW = r.next() * pool.reduce((a, x) => a + x.w, 0);
     let tpl: Template = pool[0].t;
     for (const x of pool) {
@@ -899,7 +1205,7 @@ export function generate(o: GenOpts): GenHole {
     const b = layout(r, tpl, d, !!o.champ);
     if (!b) continue;
     const out: GenHole = { map: [], template: tpl };
-    const c: Ctx = { r, b, d, course: o.course, champ: !!o.champ, spinners: [], movers: [], pts: line(b), out };
+    const c: Ctx = { r, b, d, course: o.course, champ: !!o.champ, spinners: [], movers: [], mills: [], hills: [], pts: line(b), out };
     dress(c);
     b.cv.set(b.tee.x, b.tee.z, 'T');
     b.cv.set(b.cup.x, b.cup.z, 'O');
@@ -931,6 +1237,8 @@ export function generate(o: GenOpts): GenHole {
     // (one definition per 'S', in reading order)
     if (c.spinners.length) out.spinners = [...c.spinners].sort((a, b2) => a.z - b2.z || a.x - b2.x).map((x) => x.s);
     if (c.movers.length) out.movers = c.movers.map((m) => ({ ...m, x0: sh(m.x0, 'x'), x1: sh(m.x1, 'x'), z0: sh(m.z0, 'z'), z1: sh(m.z1, 'z') }));
+    if (c.mills.length) out.mills = [...c.mills].sort((a, b2) => a.z - b2.z || a.x - b2.x).map((x) => x.m);
+    if (c.hills.length) out.hills = c.hills.map(([x, z, rr, h]) => [sh(x, 'x'), sh(z, 'z'), rr, h]);
     out.coins = placeCoins(cr.map, o.seed + attempt * 7919, d, !!o.champ);
     return out;
   }

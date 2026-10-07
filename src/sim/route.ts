@@ -171,6 +171,8 @@ export function holeDef(n: number, salt?: number): HoleDef {
       bridge: g.bridge,
       gravity: g.gravity,
       coins: g.coins,
+      hills: g.hills,
+      mills: g.mills,
       course: c.id,
     };
   }

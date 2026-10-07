@@ -309,6 +309,22 @@ export class Audio {
         this.tone(1319, 0.08, 'square', 0.06);
         this.tone(1976, 0.25, 'square', 0.06, 0.07);
         break;
+      case 'mill':
+        // a wooden sail knocks the ball back: a hollow thud
+        if (!this.limit('mill', 0.1)) return;
+        this.tone(180, 0.14, 'triangle', 0.14, 0, 110);
+        this.noiseBurst(0.1, 'bandpass', 700, 300, 0.12, 1.4);
+        break;
+      case 'loop':
+        // round the loop: a rising whoosh; not fast enough: up and back down
+        if (n) {
+          this.noiseBurst(0.7, 'bandpass', 500, 2600, 0.14, 1.1);
+          this.tone(260, 0.6, 'sine', 0.05, 0, 780);
+        } else {
+          this.noiseBurst(0.5, 'bandpass', 600, 1300, 0.1, 1.1);
+          this.tone(420, 0.45, 'sine', 0.05, 0.05, 210);
+        }
+        break;
     }
   }
 
