@@ -192,6 +192,35 @@ export function closest(p: Prim, px: number, pz: number): [number, number] {
   return Math.hypot(px - ax, pz - az) <= Math.hypot(px - bx, pz - bz) ? [ax, az] : [bx, bz];
 }
 
+/** Closest point of a primitive to (px, pz) and the normal there pointing out of the region (the region is on the
+ *  right of the outline). */
+export function closestN(p: Prim, px: number, pz: number): [number, number, number, number] {
+  if (p.k === 0) {
+    const vx = p.bx - p.ax;
+    const vz = p.bz - p.az;
+    const L = Math.hypot(vx, vz) || 1;
+    let u = ((px - p.ax) * vx + (pz - p.az) * vz) / (L * L);
+    u = u < 0 ? 0 : u > 1 ? 1 : u;
+    return [p.ax + vx * u, p.az + vz * u, vz / L, -vx / L];
+  }
+  const vx = px - p.cx;
+  const vz = pz - p.cz;
+  let a = Math.atan2(vz, vx);
+  if (!inSweep(a, p.a0, p.sw)) {
+    const e = p.a0 + p.sw;
+    const ax = p.cx + Math.cos(p.a0) * p.r;
+    const az = p.cz + Math.sin(p.a0) * p.r;
+    const bx = p.cx + Math.cos(e) * p.r;
+    const bz = p.cz + Math.sin(e) * p.r;
+    a = Math.hypot(px - ax, pz - az) <= Math.hypot(px - bx, pz - bz) ? p.a0 : e;
+  }
+  const c = Math.cos(a);
+  const sn = Math.sin(a);
+  // travelling along the arc (the sweep's way round), the outside is on the left
+  const g = p.sw >= 0 ? 1 : -1;
+  return [p.cx + c * p.r, p.cz + sn * p.r, c * g, sn * g];
+}
+
 // ---------- smoothing ----------
 interface QV {
   x: number;

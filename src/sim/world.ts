@@ -1,4 +1,4 @@
-import { closest, DX, DZ, fill, smooth, traceCorners, type Corner, type KeyPt, type Loop, type Prim } from './shape';
+import { closest, closestN, DX, DZ, fill, smooth, traceCorners, type Corner, type KeyPt, type Loop, type Prim } from './shape';
 import type { Ball, Ground, HoleDef, HoleMods, SimEvent, SimEventType } from './types';
 import { G } from './types';
 
@@ -169,6 +169,8 @@ export class Sim {
   /** low rails along the sides of the bridges (also in prims) */
   readonly rails: { ax: number; az: number; bx: number; bz: number }[] = [];
   private bucketAt!: Int32Array;
+  /** prims before this index are walls' outlines (with an inside); the rest are rails */
+  private wallPrims = 0;
   private bucket!: Int32Array;
   /** coins on the green, and the ones the real ball has rolled over this attempt */
   readonly coins: { x: number; z: number }[] = [];
@@ -521,6 +523,7 @@ export class Sim {
     }
     // what the ball bounces off: the walls' outlines and the bridges' rails
     for (const l of walls) for (const p of l.prims) this.prims.push(p);
+    this.wallPrims = this.prims.length;
     for (let i = 0; i < W * H; i++) {
       if (this.kind[i] !== K_BRIDGE) continue;
       const x = i % W;
@@ -824,6 +827,14 @@ export class Sim {
     b.x += b.vx * dt;
     b.z += b.vz * dt;
     this.collide(b, t, dt, fx);
+    if (this.fineAt(b.x, b.z) === G.Wall && this.wallDist(b.x, b.z) >= 1) {
+      // deep inside a wall (never by rolling): back onto the green
+      const p = this.safeSpot(b.x, b.z);
+      b.x = p.x;
+      b.z = p.z;
+      b.vx *= 0.3;
+      b.vz *= 0.3;
+    }
     const ci = Math.floor(b.z) * this.W + Math.floor(b.x);
     const inMap = b.x >= 0 && b.z >= 0 && b.x < this.W && b.z < this.H;
     // boosters: at least BOOST_SPEED in their direction, and most of the sideways speed goes
@@ -973,7 +984,8 @@ export class Sim {
     const R = BALL_R;
     // walls: the smooth outlines near the ball, the portcullises that are down and the windmills' sails (twice, for
     // corners)
-    for (let it = 0; it < 2; it++) {
+    const walls = (its: number, ev: boolean) => {
+    for (let it = 0; it < its; it++) {
       const x0 = Math.floor(b.x - R);
       const x1 = Math.floor(b.x + R);
       const z0 = Math.floor(b.z - R);
@@ -987,15 +999,33 @@ export class Sim {
       const cz0 = Math.floor(b.z);
       if (cx0 >= 0 && cz0 >= 0 && cx0 < this.W && cz0 < this.H) {
         const i = cz0 * this.W + cx0;
+        let near = Infinity;
+        let nIn = false;
+        let nnx = 0;
+        let nnz = 0;
         for (let k = this.bucketAt[i]; k < this.bucketAt[i + 1]; k++) {
-          const [px, pz] = closest(this.prims[this.bucket[k]], b.x, b.z);
+          const pk = this.bucket[k];
+          const [px, pz, ox, oz] = closestN(this.prims[pk], b.x, b.z);
           const dx = b.x - px;
           const dz = b.z - pz;
           const d = Math.hypot(dx, dz);
+          if (d < near) {
+            near = d;
+            // (the bridges' rails have no inside)
+            nIn = pk < this.wallPrims && dx * ox + dz * oz < 0;
+            nnx = ox;
+            nnz = oz;
+          }
           if (d >= R || d < 1e-9 || R - d <= best) continue;
           best = R - d;
           bnx = dx / d;
           bnz = dz / d;
+        }
+        // the centre ended up inside a wall (squeezed in by a sliding block): straight back out
+        if (nIn) {
+          best = R + near;
+          bnx = nnx;
+          bnz = nnz;
         }
       }
       this.mills.forEach((m, k) => {
@@ -1044,12 +1074,14 @@ export class Sim {
       b.x += bnx * best;
       b.z += bnz * best;
       const v = this.bounce(b, bnx, bnz, rest);
-      if (fx && v > 0.8 && t - this.lastWallT > 0.08) {
+      if (ev && v > 0.8 && t - this.lastWallT > 0.08) {
         this.lastWallT = t;
         if (sail >= 0) this.emit('mill', b.x, b.z, sail);
         else this.emit('wall', b.x, b.z, v);
       }
     }
+    };
+    walls(2, fx);
     // bumpers: bouncy round posts
     this.bumpers.forEach((p, k) => {
       const dx = b.x - p.x;
@@ -1137,6 +1169,17 @@ export class Sim {
       }
       void dt;
     });
+    // whatever pushed the ball (a sliding block, a beam), the walls have the last word
+    if (this.movers.length || this.spinners.length || this.bumpers.length) walls(1, false);
+    // squeezed between a sliding block and a wall: it pops out past the block's side
+    for (const m of this.movers) {
+      const p = this.moverPos(m, t);
+      const qx = Math.max(p.x - m.hw, Math.min(b.x, p.x + m.hw));
+      const qz = Math.max(p.z - m.hh, Math.min(b.z, p.z + m.hh));
+      if (Math.hypot(b.x - qx, b.z - qz) >= R - 0.03) continue;
+      if (Math.abs(p.vx) >= Math.abs(p.vz)) b.z = b.z < p.z ? p.z - m.hh - R : p.z + m.hh + R;
+      else b.x = b.x < p.x ? p.x - m.hw - R : p.x + m.hw + R;
+    }
     // never leave the map
     b.x = Math.max(R, Math.min(this.W - R, b.x));
     b.z = Math.max(R, Math.min(this.H - R, b.z));
