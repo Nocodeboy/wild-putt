@@ -775,26 +775,34 @@ function bridgeOver(c: Ctx): boolean {
   for (let k = 0; k < rows; k++) cells.push(across(p.s, p.x + dx * k, p.z + dz * k));
   if (!cells.flat().every(([x, z]) => free(c.b, x, z, 1))) return false;
   const n = cells[0].length;
-  const g = c.r.int(0, n - 1);
-  const wide = n >= 5 && c.d < 0.5 && c.r.next() < 0.5 ? 2 : 1;
+  const wide = n >= 4 ? 2 : 1;
+  const g = c.r.int(0, n - wide);
   for (const row of cells) row.forEach(([x, z], i) => c.b.cv.set(x, z, i >= g && i < g + wide ? 'b' : '~'));
   return true;
 }
 
 /** A stream right across a straight stretch with a row of ramps before it: jump it. */
 function jumpOver(c: Ctx): boolean {
-  const p = spot(c, 0.3, 0.7, 3);
-  if (!p) return false;
-  const [dx, dz] = DIRS[p.s.dir];
-  const s = p.s;
-  const toB = Math.abs(p.x - s.bx) + Math.abs(p.z - s.bz);
-  if (toB < 4 && p.seg !== c.b.segs.length - 1) return false;
-  const ramp = across(s, p.x - dx, p.z - dz);
-  const water = [across(s, p.x, p.z), across(s, p.x + dx, p.z + dz)];
-  if (![...ramp, ...water.flat()].every(([x, z]) => free(c.b, x, z, 1))) return false;
-  for (const [x, z] of ramp) c.b.cv.set(x, z, 'J');
-  for (const row of water) for (const [x, z] of row) c.b.cv.set(x, z, '~');
-  return true;
+  for (let k = 0; k < 6; k++) {
+    const p = spot(c, 0.2, 0.75, 3);
+    if (!p) return false;
+    const [dx, dz] = DIRS[p.s.dir];
+    const s = p.s;
+    const rows = c.r.next() < 0.5 ? 2 : 1;
+    const toB = Math.abs(p.x - s.bx) + Math.abs(p.z - s.bz);
+    if (toB < rows + 2 && p.seg !== c.b.segs.length - 1) continue;
+    const ramp = across(s, p.x - dx, p.z - dz);
+    const water: [number, number][][] = [];
+    for (let i = 0; i < rows; i++) water.push(across(s, p.x + dx * i, p.z + dz * i));
+    const land = across(s, p.x + dx * rows, p.z + dz * rows);
+    if (![...ramp, ...water.flat()].every(([x, z]) => free(c.b, x, z, 1))) continue;
+    // somewhere to land
+    if (!land.every(([x, z]) => c.b.cv.carved(x, z) && c.b.cv.get(x, z) !== ' ')) continue;
+    for (const [x, z] of ramp) c.b.cv.set(x, z, 'J');
+    for (const row of water) for (const [x, z] of row) c.b.cv.set(x, z, '~');
+    return true;
+  }
+  return false;
 }
 
 /** Mounds on the green, where there is room all round them (in canvas cells: x, z, radius, height). */
@@ -823,10 +831,12 @@ function mounds(c: Ctx, n: number) {
 /** The cup on top of a mound (the volcano). */
 function cupMound(c: Ctx): boolean {
   const cup = c.b.cup;
-  const r = 1.8;
-  if (!roomOf(c, cup.x + 0.5, cup.z + 0.5, r + 0.4, true)) return false;
-  c.hills.push([cup.x + 0.5, cup.z + 0.5, r, 0.38]);
-  return true;
+  for (const r of [1.8, 1.4]) {
+    if (!roomOf(c, cup.x + 0.5, cup.z + 0.5, r + 0.4, true)) continue;
+    c.hills.push([cup.x + 0.5, cup.z + 0.5, r, r > 1.6 ? 0.38 : 0.32]);
+    return true;
+  }
+  return false;
 }
 
 /** All the cells within `rad` of (x, z) are plain carved green (the cup allowed if `cup`). */
@@ -846,18 +856,18 @@ function roomOf(c: Ctx, x: number, z: number, rad: number, cup: boolean): boolea
 
 /** Each course's share of the classics: [windmill, loop, bridge, jump, mounds, cup on a mound, pipes]. */
 const CLASSIC: Record<ThemeId, [number, number, number, number, number, number, number]> = {
-  garden: [0.55, 0, 0.4, 0.15, 0.45, 0.1, 0.2],
+  garden: [0.5, 0, 0.45, 0.25, 0.45, 0.15, 0.2],
   roofs: [0.1, 0.3, 0, 0, 0.3, 0.05, 0.3],
   ship: [0.2, 0.25, 0, 0, 0.3, 0.05, 0.25],
-  fair: [0.45, 0.55, 0, 0, 0.35, 0.1, 0.3],
-  glacier: [0.2, 0.1, 0.4, 0.15, 0.5, 0.1, 0.25],
-  volcano: [0.1, 0.1, 0, 0, 0.4, 0.5, 0.15],
-  beach: [0.25, 0, 0.4, 0.3, 0.5, 0.1, 0.1],
-  temple: [0.15, 0.25, 0, 0, 0.4, 0.1, 0],
-  castle: [0.3, 0.2, 0.3, 0, 0.25, 0.05, 0.1],
-  neon: [0.1, 0.55, 0, 0, 0.3, 0.1, 0.3],
-  canyon: [0.1, 0.2, 0, 0, 0.45, 0.1, 0.3],
-  moon: [0, 0.35, 0, 0, 0.5, 0.2, 0.1],
+  fair: [0.45, 0.55, 0, 0, 0.35, 0.15, 0.3],
+  glacier: [0.2, 0.1, 0.45, 0.25, 0.5, 0.15, 0.25],
+  volcano: [0.1, 0.1, 0, 0, 0.4, 0.55, 0.15],
+  beach: [0.25, 0, 0.45, 0.45, 0.5, 0.15, 0.1],
+  temple: [0.15, 0.25, 0, 0, 0.4, 0.15, 0],
+  castle: [0.3, 0.2, 0.35, 0.15, 0.25, 0.1, 0.1],
+  neon: [0.1, 0.55, 0, 0, 0.3, 0.15, 0.3],
+  canyon: [0.1, 0.2, 0, 0, 0.45, 0.15, 0.3],
+  moon: [0, 0.35, 0, 0, 0.5, 0.25, 0.1],
 };
 
 function classics(c: Ctx) {
