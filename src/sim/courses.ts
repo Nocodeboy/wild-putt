@@ -2,7 +2,11 @@ import type { CourseDef, HoleDef } from './types';
 
 // Legend: ' ' void (falls off: +1) · '#' wall · '.' green · ':' sand · '~' water · '_' ice · 'L' lava
 // '^' 'v' '<' '>' slopes (the ball is pushed that way) · 'O' cup · 'T' tee · 'B' bumper · 'S' spinning beam centre
-// Holes are drawn with the tee at the bottom and the cup at the top: the camera looks up the screen.
+// The classics (1.1): 'W' a windmill's door (walls on both sides: the house; `mills` sets the sails' speed) ·
+// 'Q' a loop-the-loop (walls on both sides) · 'b' a wooden bridge over the water (rails along the water) ·
+// 'P' tunnel pairs · 'J' ramps that jump over the void or the water beside them · `hills`: mounds [x, z, radius, height]
+// Holes are drawn with the tee at the bottom and the cup at the top: the camera looks up the screen. The walls,
+// the edge of the hole and the hazards are drawn on the grid; the game rounds them into smooth curves (shape.ts).
 
 const h = (d: HoleDef) => d;
 
