@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { inPoly, type P2 } from '../sim/shape';
 import { G, type SimEvent } from '../sim/types';
-import { BALL_R, type Sim } from '../sim/world';
+import { BALL_R, K_BRIDGE, LOOP_R, type Sim } from '../sim/world';
 import { box, cone, cyl, dode, ico, merge, part, type Part } from './geo';
 import { FxList, Particles } from './particles';
 import type { Theme } from './themes';
@@ -10,6 +11,7 @@ const PX = 48; // texels per cell on the painted green
 const RAIL_H = 0.26; // rail height (its rounded cap sits on top)
 const RAIL_T = 0.2; // rail thickness, inside the wall cell, flush with the cell edge
 const PIT = 0.34; // depth of the cup and of ponds
+const LAVA_PX = 16; // texels per cell of the lava's mask
 
 function lcg(seed: number) {
   let s = seed >>> 0 || 1;
@@ -170,8 +172,13 @@ export class LevelView {
   private waterTex: THREE.CanvasTexture | null = null;
   private seaTex: THREE.CanvasTexture | null = null;
   private lavaTex: THREE.CanvasTexture | null = null;
-  private lavaMesh: THREE.InstancedMesh | null = null;
+  private lavaMesh: THREE.Mesh | null = null;
+  private lavaMask: HTMLCanvasElement | null = null;
+  private lavaMaskTex: THREE.CanvasTexture | null = null;
+  private lavaCells: P2[] = [];
   private lavaCount = 0;
+  /** tunnels look like pipes (the classic minigolf ones), except in the temple and in neon city */
+  private pipes = true;
   private lavaLight: THREE.PointLight | null = null;
   private sparkP = new Particles(1000, { additive: true, soft: 0.2 });
   private puffP = new Particles(1000, { soft: 0.35 });
@@ -189,6 +196,8 @@ export class LevelView {
   private portalDiscs: THREE.Mesh[] = [];
   private wellParts: { ring: THREE.Mesh; pull: THREE.Mesh[] }[] = [];
   private coinMeshes: THREE.Mesh[] = [];
+  private sails: THREE.Object3D[] = [];
+  private coinY: number[] = [];
   private swirlTex: THREE.CanvasTexture | null = null;
   private tier: 'high' | 'medium' | 'low' = 'high';
   private trailT = 0;
@@ -220,6 +229,7 @@ export class LevelView {
     this.group.add(this.hole);
     this.shown = { x: s.ball.x, z: s.ball.z };
 
+    this.pipes = !theme.glow && theme.floor !== 'tiles';
     // ---- plate, rails, ponds, cup ----
     inner.add(this.buildPlate());
     inner.add(this.buildRails());
@@ -233,16 +243,24 @@ export class LevelView {
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
     this.tex.anisotropy = 8;
-    const sg = new THREE.PlaneGeometry(s.W, s.H);
+    const hilly = s.hills.length > 0;
+    const sg = new THREE.PlaneGeometry(s.W, s.H, hilly ? s.W * 4 : 1, hilly ? s.H * 4 : 1);
     sg.rotateX(-PI / 2);
     sg.translate(s.W / 2, 0.002, s.H / 2);
+    if (hilly) {
+      // the mounds: the painted surface rises over them
+      const sp = sg.attributes.position;
+      for (let k = 0; k < sp.count; k++) sp.setY(k, 0.002 + s.heightAt(sp.getX(k), sp.getZ(k)));
+      sg.computeVertexNormals();
+    }
     const surface = new THREE.Mesh(sg, new THREE.MeshLambertMaterial({ map: this.tex, alphaTest: 0.5 }));
     surface.receiveShadow = true;
     inner.add(surface);
     this.buildCup();
     // ---- flag ----
     this.flag = new THREE.Group();
-    this.flag.position.set(s.cup.x, 0, s.cup.z);
+    this.cupY = s.heightAt(s.cup.x, s.cup.z);
+    this.flag.position.set(s.cup.x, this.cupY, s.cup.z);
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.9, 8), new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.4 }));
     pole.position.y = 0.95;
     pole.castShadow = true;
@@ -362,10 +380,15 @@ export class LevelView {
     // ---- lava (volcano): glowing tiles over the green, more of them after every putt ----
     if (s.lavaDist || s.ground.some((g) => g === G.Lava)) {
       this.lavaTex = lavaTexture();
-      const lg = new THREE.PlaneGeometry(1, 1);
+      this.lavaTex.repeat.set(s.W, s.H);
+      this.lavaMask = document.createElement('canvas');
+      this.lavaMask.width = s.W * LAVA_PX;
+      this.lavaMask.height = s.H * LAVA_PX;
+      this.lavaMaskTex = new THREE.CanvasTexture(this.lavaMask);
+      const lg = new THREE.PlaneGeometry(s.W, s.H);
       lg.rotateX(-PI / 2);
-      this.lavaMesh = new THREE.InstancedMesh(lg, new THREE.MeshBasicMaterial({ map: this.lavaTex }), s.W * s.H);
-      this.lavaMesh.count = 0;
+      lg.translate(s.W / 2, 0.012, s.H / 2);
+      this.lavaMesh = new THREE.Mesh(lg, new THREE.MeshBasicMaterial({ map: this.lavaTex, alphaMap: this.lavaMaskTex, alphaTest: 0.5 }));
       inner.add(this.lavaMesh);
       this.lavaLight = new THREE.PointLight(0xff7a20, 8, 10, 1.6);
       this.lavaLight.position.set(s.W / 2, 1.5, s.H - 1);
@@ -374,6 +397,7 @@ export class LevelView {
     }
     // ---- the new courses: tide, drawbridge, portcullises, boosters, ramps, tunnels, wells; and the coins ----
     this.buildDynamic();
+    this.buildClassics();
     // ---- surroundings ----
     this.buildSurround();
     this.group.add(this.sparkP.points, this.puffP.points);
@@ -499,8 +523,24 @@ export class LevelView {
       m.receiveShadow = true;
       this.inner.add(m);
     }
-    // ---- tunnels: a glowing ring and a swirl deep in the hole ----
-    if (s.portals.length) {
+    // ---- tunnels: pipe mouths (one colour per pair), or a glowing ring and a swirl in the temple and neon city ----
+    if (s.portals.length && this.pipes) {
+      s.portals.forEach((p, k) => {
+        const c = [0xe8483a, 0x3a8ae8, 0xf2c23a][(k >> 1) % 3];
+        const liner = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, PIT, 20, 1, true), new THREE.MeshLambertMaterial({ color: 0x15151a, side: THREE.BackSide }));
+        liner.position.set(p.x, -PIT / 2, p.z);
+        const bottom = new THREE.Mesh(new THREE.CircleGeometry(0.34, 20), new THREE.MeshBasicMaterial({ color: 0x050507 }));
+        bottom.rotation.x = -PI / 2;
+        bottom.position.set(p.x, -PIT + 0.01, p.z);
+        const mouth = new THREE.Mesh(
+          merge([part(new THREE.TorusGeometry(0.4, 0.075, 8, 28), c, 0, 0.035, 0, PI / 2), part(new THREE.TorusGeometry(0.4, 0.03, 6, 28), 0xffffff, 0, 0.1, 0, PI / 2)]),
+          new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.2 }),
+        );
+        mouth.position.set(p.x, 0, p.z);
+        mouth.castShadow = true;
+        this.inner.add(liner, bottom, mouth);
+      });
+    } else if (s.portals.length) {
       this.swirlTex = swirlTexture();
       s.portals.forEach((p, k) => {
         const c = k < 2 ? glow : 0xff8a3a;
@@ -542,11 +582,168 @@ export class LevelView {
       const cm = new THREE.MeshStandardMaterial({ color: 0xffc43d, roughness: 0.3, metalness: 0.7, emissive: 0x6a4a00, emissiveIntensity: 0.6 });
       for (const c of s.coins) {
         const m = new THREE.Mesh(cg, cm);
+        this.coinY.push(s.heightAt(c.x, c.z));
         m.position.set(c.x, 0.32, c.z);
         m.castShadow = true;
         this.inner.add(m);
         this.coinMeshes.push(m);
       }
+    }
+  }
+
+  /** The classic minigolf pieces: windmills, loop-the-loops, wooden bridges. */
+  private buildClassics() {
+    const s = this.sim;
+    const t = this.theme;
+    const vmat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    // ---- windmills: a house with a door right through it, a tower, four sails sweeping past the door ----
+    const HUB = 1.45;
+    const BL = HUB - 0.13;
+    for (const m of s.mills) {
+      const g = new THREE.Group();
+      g.position.set(m.x, 0, m.z);
+      g.rotation.y = m.ax === 1 ? (m.front > 0 ? 0 : PI) : m.front > 0 ? PI / 2 : -PI / 2;
+      const wallC = hexNum(t.wall, 1.05);
+      const roofC = 0xc0503a;
+      const P: Part[] = [];
+      for (const sd of [-1, 1]) P.push(part(box(1.08, 0.95, 1), wallC, sd * 0.96, 0.475, 0));
+      P.push(part(box(0.84, 0.33, 1), wallC, 0, 0.785, 0));
+      // door frame and the dark tunnel through the house
+      P.push(part(box(0.1, 0.66, 1.02), 0x6a4a2e, -0.45, 0.33, 0), part(box(0.1, 0.66, 1.02), 0x6a4a2e, 0.45, 0.33, 0), part(box(1.0, 0.1, 1.02), 0x6a4a2e, 0, 0.66, 0));
+      P.push(part(box(0.8, 0.02, 1.0), 0x2a2a2a, 0, 0.62, 0));
+      // windows and a little roof over each side
+      for (const sd of [-1, 1]) {
+        P.push(part(box(0.3, 0.3, 0.04), 0x6ab8e8, sd * 0.95, 0.55, 0.51), part(box(0.36, 0.05, 0.06), 0xffffff, sd * 0.95, 0.72, 0.52));
+        P.push(part(box(1.14, 0.08, 1.12), roofC, sd * 0.96, 0.99, 0));
+      }
+      // the tower and its cap
+      P.push(part(cyl(0.55, 0.78, 1.3, 8), hexNum(wallC, 0.95), 0, 0.95 + 0.65, -0.05));
+      P.push(part(cyl(0.6, 0.6, 0.08, 8), 0x6a4a2e, 0, 0.95 + 1.3, -0.05));
+      P.push(part(cone(0.66, 0.62, 8), roofC, 0, 0.95 + 1.3 + 0.35, -0.05));
+      P.push(part(ico(0.08), 0xffd23a, 0, 0.95 + 1.3 + 0.7, -0.05));
+      P.push(part(box(0.32, 0.4, 0.05), 0x5a3a22, 0, 1.25, 0.66, -0.14, 0, 0));
+      const house = new THREE.Mesh(merge(P), vmat);
+      house.castShadow = true;
+      house.receiveShadow = true;
+      g.add(house);
+      // the sails (they turn about the hub, in front of the tower)
+      const sails = new THREE.Group();
+      sails.position.set(0, HUB, 0.78);
+      const S: Part[] = [part(cyl(0.11, 0.11, 0.16, 10), 0x4a3a2a, 0, 0, 0, PI / 2), part(ico(0.07), 0xffd23a, 0, 0, 0.1)];
+      for (let k = 0; k < 4; k++) {
+        const a = (k * PI) / 2;
+        const ca = Math.cos(a);
+        const sa = Math.sin(a);
+        S.push(part(box(BL, 0.06, 0.05), 0x6a4a2e, (ca * BL) / 2, (sa * BL) / 2, 0, 0, 0, a));
+        // the cloth: a frame with a red stripe, offset to one side of the spar
+        const L = BL - 0.28;
+        const mid = 0.28 + L / 2;
+        const ox = -sa * 0.17;
+        const oz = ca * 0.17;
+        S.push(part(box(L, 0.3, 0.025), 0xf4f0e6, ca * mid + ox, sa * mid + oz, 0.01, 0, 0, a));
+        S.push(part(box(L, 0.07, 0.03), t.flag, ca * mid + ox * 1.6, sa * mid + oz * 1.6, 0.012, 0, 0, a));
+      }
+      const sm = new THREE.Mesh(merge(S), vmat);
+      sm.castShadow = true;
+      sails.add(sm);
+      g.add(sails);
+      this.inner.add(g);
+      this.sails.push(sails);
+    }
+    // ---- loop-the-loops: two steel rails on the ball's own path round the loop, on white supports ----
+    for (const L of s.loops) {
+      const g = new THREE.Group();
+      g.position.set(L.x, 0, L.z);
+      g.rotation.y = L.ax === 1 ? -PI / 2 : 0;
+      const R = LOOP_R + BALL_R;
+      const P: Part[] = [];
+      // the track: a band the ball rolls round the inside of, with a steel edge on each side
+      const path = (u: number) => {
+        const e = Math.min(1, Math.max(0, u));
+        return { x: -0.5 + u + R * Math.sin(2 * PI * e), y: Math.max(0.01, R - R * Math.cos(2 * PI * e)), nx: -Math.sin(2 * PI * e), ny: Math.cos(2 * PI * e) };
+      };
+      const band: number[] = [];
+      const N = 96;
+      for (let k = 0; k < N; k++) {
+        const a = path(-0.06 + (k / N) * 1.12);
+        const b = path(-0.06 + ((k + 1) / N) * 1.12);
+        for (const [p, q, r] of [
+          [a, b, 0],
+          [a, b, 1],
+        ] as const) {
+          void r;
+          band.push(p.x, p.y, -0.21, q.x, q.y, -0.21, q.x, q.y, 0.21, p.x, p.y, -0.21, q.x, q.y, 0.21, p.x, p.y, 0.21);
+          break;
+        }
+      }
+      const bg = new THREE.BufferGeometry();
+      bg.setAttribute('position', new THREE.Float32BufferAttribute(band, 3));
+      bg.computeVertexNormals();
+      const track = new THREE.Mesh(bg, new THREE.MeshStandardMaterial({ color: t.flag, roughness: 0.4, metalness: 0.2, side: THREE.DoubleSide }));
+      track.castShadow = true;
+      g.add(track);
+      for (const lat of [-0.22, 0.22]) {
+        const pts: THREE.Vector3[] = [];
+        for (let k = 0; k <= 72; k++) {
+          const p = path(-0.06 + (k / 72) * 1.12);
+          pts.push(new THREE.Vector3(p.x + p.nx * 0.05, p.y + p.ny * 0.05, lat));
+        }
+        P.push(part(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 90, 0.035, 6, false), 0xd8dce4));
+      }
+      // cross ties every so often, and the supports
+      for (let k = 0; k < 12; k++) {
+        const u = (k + 0.5) / 12;
+        const sx = -0.5 + u + R * Math.sin(2 * PI * u);
+        const sy = R - R * Math.cos(2 * PI * u);
+        P.push(part(box(0.05, 0.05, 0.36), t.flag, sx + Math.sin(2 * PI * u) * 0.04, Math.max(0.03, sy) - Math.cos(2 * PI * u) * -0.04, 0));
+      }
+      for (const sx of [-0.62, 0.62]) {
+        P.push(part(box(0.07, R * 2 + 0.2, 0.07), 0xffffff, sx, R + 0.1, -0.32), part(box(0.07, R * 2 + 0.2, 0.07), 0xffffff, sx, R + 0.1, 0.32));
+        P.push(part(box(0.07, 0.07, 0.7), 0xffffff, sx, R * 2 + 0.2, 0));
+      }
+      P.push(part(box(1.3, 0.06, 0.07), 0xffffff, 0, R * 2 + 0.2, -0.32), part(box(1.3, 0.06, 0.07), 0xffffff, 0, R * 2 + 0.2, 0.32));
+      const mesh = new THREE.Mesh(merge(P), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.35 }));
+      mesh.castShadow = true;
+      g.add(mesh);
+      this.inner.add(g);
+    }
+    // ---- bridges: planks across, beams under, low rails along the water ----
+    const B: Part[] = [];
+    const pondy = (x: number, z: number) => {
+      if (x < 0 || z < 0 || x >= s.W || z >= s.H) return true;
+      const i = z * s.W + x;
+      return s.ground[i] === G.Water || s.ground[i] === G.Void || s.kind[i] === K_BRIDGE;
+    };
+    for (let i = 0; i < s.kind.length; i++) {
+      if (s.kind[i] !== K_BRIDGE) continue;
+      const x = i % s.W;
+      const z = (i - x) / s.W;
+      const sideWater = pondy(x - 1, z) || pondy(x + 1, z);
+      const endWater = pondy(x, z - 1) && pondy(x, z + 1);
+      const alongZ = !(endWater && !sideWater) && (sideWater || !endWater);
+      for (let k = 0; k < 5; k++) {
+        const o = -0.4 + k * 0.2;
+        const c = k % 2 ? 0x9a6a3a : 0x8a5a30;
+        B.push(part(box(alongZ ? 1 : 0.18, 0.06, alongZ ? 0.18 : 1), c, x + 0.5 + (alongZ ? 0 : o), -0.025, z + 0.5 + (alongZ ? o : 0)));
+      }
+      for (const o of [-0.42, 0.42]) B.push(part(box(alongZ ? 0.1 : 1, 0.1, alongZ ? 1 : 0.1), 0x5a3a20, x + 0.5 + (alongZ ? o : 0), -0.1, z + 0.5 + (alongZ ? 0 : o)));
+    }
+    for (const r of s.rails) {
+      const len = Math.hypot(r.bx - r.ax, r.bz - r.az);
+      const horiz = Math.abs(r.bz - r.az) < 1e-6;
+      for (const [px, pz] of [
+        [r.ax, r.az],
+        [r.bx, r.bz],
+      ])
+        B.push(part(box(0.09, 0.34, 0.09), 0x6a4426, px, 0.17, pz));
+      B.push(part(box(horiz ? len : 0.07, 0.06, horiz ? 0.07 : len), 0x8a5a30, (r.ax + r.bx) / 2, 0.29, (r.az + r.bz) / 2));
+      B.push(part(box(horiz ? len : 0.05, 0.05, horiz ? 0.05 : len), 0x7a4c28, (r.ax + r.bx) / 2, 0.14, (r.az + r.bz) / 2));
+    }
+    if (B.length) {
+      const m = new THREE.Mesh(merge(B), vmat);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      this.inner.add(m);
     }
   }
 
@@ -645,24 +842,60 @@ export class LevelView {
     return g !== G.Wall && g !== G.Void;
   }
 
-  /** The block the hole stands on. Ponds and the cup are pits sunk into it. */
+  /** The fine ground at (x, z) is something the ball rolls over (not a wall, not the void). */
+  private openAt(x: number, z: number): boolean {
+    const g = this.sim.fineAt(x, z);
+    return g !== G.Wall && g !== G.Void;
+  }
+
+  /** Three.js shapes from outlines: loops with a positive area are outer edges, the others holes in the smallest one
+   *  around them. Shape coordinates are (x, −z): see extrude(). */
+  private shapes(loops: { pts: P2[]; area: number }[]): THREE.Shape[] {
+    const outers = loops.filter((l) => l.area > 0).sort((a, b) => a.area - b.area);
+    const holes = loops.filter((l) => l.area < 0);
+    const trace = (path: THREE.Path, pts: P2[]) => {
+      pts.forEach((p, i) => (i ? path.lineTo(p.x, -p.z) : path.moveTo(p.x, -p.z)));
+      path.closePath();
+    };
+    const out = outers.map((l) => {
+      const sh = new THREE.Shape();
+      trace(sh, l.pts);
+      return sh;
+    });
+    for (const h of holes) {
+      const p0 = h.pts[0];
+      const k = outers.findIndex((o) => inPoly(p0.x, p0.z, o.pts));
+      if (k < 0) continue;
+      const path = new THREE.Path();
+      trace(path, h.pts);
+      out[k].holes.push(path);
+    }
+    return out;
+  }
+
+  /** The block the hole stands on: its edge follows the smooth outline; ponds, the cup and the tunnels are pits. */
   private buildPlate(): THREE.Object3D {
     const s = this.sim;
     const t = this.theme;
-    const depth = -t.outsideY;
-    const cupCell = Math.floor(s.cup.z) * s.W + Math.floor(s.cup.x);
-    const pits = new Set<number>([cupCell, ...s.portals.map((p) => Math.floor(p.z) * s.W + Math.floor(p.x))]);
-    const P: Part[] = [];
-    for (let z = 0; z < s.H; z++)
-      for (let x = 0; x < s.W; x++) {
-        const i = z * s.W + x;
-        const g = s.ground[i];
-        if (g === G.Void) continue;
-        const top = g === G.Water || pits.has(i) || s.dyn[i] === 2 ? -PIT : 0;
-        P.push(part(box(1, 0.14, 1), t.base[0], x + 0.5, top - 0.07, z + 0.5));
-        const h = depth + top - 0.14;
-        if (h > 0.02) P.push(part(box(1, h, 1), t.base[1], x + 0.5, top - 0.14 - h / 2, z + 0.5));
-      }
+    const depth = Math.max(-t.outsideY, PIT + 0.14);
+    const ring = (c: P2, r: number): { pts: P2[]; area: number } => ({
+      pts: Array.from({ length: 28 }, (_, k) => ({ x: c.x + Math.cos((k / 28) * PI * 2) * r, z: c.z + Math.sin((k / 28) * PI * 2) * r })),
+      area: -1,
+    });
+    const land = this.shapes(s.shape.land);
+    const top = this.shapes([
+      ...s.shape.land,
+      ...s.shape.pond.map((l) => ({ pts: [...l.pts].reverse(), area: -l.area })),
+      ring(s.cup, s.cupR),
+      ...s.portals.map((p) => ring(p, 0.34)),
+    ]);
+    const extrude = (sh: THREE.Shape[], y0: number, y1: number, color: number) => {
+      const g = new THREE.ExtrudeGeometry(sh, { depth: y1 - y0, bevelEnabled: false, curveSegments: 1, steps: 1 });
+      g.rotateX(-PI / 2);
+      g.translate(0, y0, 0);
+      return part(g, color);
+    };
+    const P: Part[] = [extrude(top, -0.14, 0, t.base[0]), extrude(top, -PIT, -0.14, t.base[1]), extrude(land, -depth, -PIT, t.base[1])];
     const plate = new THREE.Mesh(merge(P), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
     plate.receiveShadow = true;
     const g = new THREE.Group();
@@ -672,113 +905,218 @@ export class LevelView {
   }
 
   /**
-   * Rails: a thin rounded bar along every edge where a wall cell meets the playing surface (its inner face is
-   * exactly where the ball bounces), with posts at the corners. Low decoration on the rest of the wall cells.
+   * Rails: a rounded bar along the walls' smooth outline wherever the ball can reach it (its inner face is exactly where
+   * the ball bounces), posts now and then, and low decoration on the rest of the walls.
    */
   private buildRails(): THREE.Object3D {
     const s = this.sim;
     const t = this.theme;
-    const R: Part[] = [];
+    const capC = hexNum(t.wall, 1.12);
     const C: Part[] = [];
     const D: Part[] = [];
-    const posts = new Set<string>();
-    const capC = hexNum(t.wall, 1.12);
+    const runs: P2[][] = [];
+    const closed: boolean[] = [];
+    for (const lp of s.shape.walls) {
+      const pts = lp.pts;
+      const n = pts.length;
+      // a rail along every stretch with open ground on the outside (the walls are on the right of the outline)
+      const on = pts.map((a, i) => {
+        const b = pts[(i + 1) % n];
+        const L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+        const mx = (a.x + b.x) / 2 + ((b.z - a.z) / L) * 0.3;
+        const mz = (a.z + b.z) / 2 - ((b.x - a.x) / L) * 0.3;
+        return this.openAt(mx, mz);
+      });
+      // (close single gaps)
+      for (let i = 0; i < n; i++) if (!on[i] && on[(i - 1 + n) % n] && on[(i + 1) % n]) on[i] = true;
+      if (on.every(Boolean)) {
+        runs.push([...pts, pts[0]]);
+        closed.push(true);
+        // a small island of wall (a post, a short block): solid, with a cap level with the rails
+        if (lp.area > 0 && lp.area < 3.6) {
+          const sh = this.shapes([lp]);
+          const g = new THREE.ExtrudeGeometry(sh, { depth: RAIL_H + RAIL_T * 0.42, bevelEnabled: false, curveSegments: 1 });
+          g.rotateX(-PI / 2);
+          C.push(part(g, t.wallTop));
+        }
+        continue;
+      }
+      let i0 = on.findIndex((v) => !v);
+      for (let k = 1; k <= n; k++) {
+        const i = (i0 + k) % n;
+        if (!on[i] || on[(i - 1 + n) % n]) continue;
+        const run: P2[] = [pts[i]];
+        let j = i;
+        while (on[j % n] && run.length <= n) {
+          run.push(pts[(j + 1) % n]);
+          j++;
+        }
+        runs.push(run);
+        closed.push(false);
+      }
+      void i0;
+    }
+    const pos: number[] = [];
+    const nor: number[] = [];
+    const col: number[] = [];
+    const cw = new THREE.Color(t.wall);
+    const cc = new THREE.Color(capC);
+    // the bar's cross-section: inner face, rounded cap, outer face (offset into the wall, height)
+    const prof: { o: number; y: number; no: number; ny: number; cap: boolean }[][] = [];
+    prof.push([
+      { o: 0, y: 0, no: -1, ny: 0, cap: false },
+      { o: 0, y: RAIL_H, no: -1, ny: 0, cap: false },
+    ]);
+    const capPts: { o: number; y: number; no: number; ny: number; cap: boolean }[] = [];
+    for (let k = 0; k <= 6; k++) {
+      const a = PI - (k / 6) * PI;
+      capPts.push({ o: RAIL_T / 2 + (Math.cos(a) * RAIL_T) / 2, y: RAIL_H + (Math.sin(a) * RAIL_T) / 2, no: Math.cos(a), ny: Math.sin(a), cap: true });
+    }
+    prof.push(capPts);
+    prof.push([
+      { o: RAIL_T, y: RAIL_H, no: 1, ny: 0, cap: false },
+      { o: RAIL_T, y: 0, no: 1, ny: 0, cap: false },
+    ]);
+    runs.forEach((run, r) => {
+      const m = run.length;
+      if (m < 2) return;
+      // into the wall at every point (mitred at sharp corners)
+      const inw = run.map((p, i) => {
+        const a = run[Math.max(0, i - 1)];
+        const b = run[Math.min(m - 1, i + 1)];
+        let tx: number;
+        let tz: number;
+        if (closed[r] && (i === 0 || i === m - 1)) {
+          const a2 = run[m - 2];
+          const b2 = run[1];
+          tx = b2.x - a2.x;
+          tz = b2.z - a2.z;
+        } else {
+          tx = b.x - a.x;
+          tz = b.z - a.z;
+        }
+        const L = Math.hypot(tx, tz) || 1;
+        tx /= L;
+        tz /= L;
+        // mitre: keep the bar's thickness through a corner
+        let k = 1;
+        if (i > 0 && i < m - 1) {
+          const ax = p.x - a.x;
+          const az = p.z - a.z;
+          const la = Math.hypot(ax, az) || 1;
+          const c = (ax / la) * tx + (az / la) * tz;
+          k = 1 / Math.max(0.5, c);
+        }
+        return { x: -tz * k, z: tx * k, nx: -tz, nz: tx };
+      });
+      for (const seg of prof)
+        for (let q = 0; q + 1 < seg.length; q++) {
+          const A = seg[q];
+          const B = seg[q + 1];
+          for (let i = 0; i + 1 < m; i++) {
+            const quad = [
+              [i, A],
+              [i + 1, B],
+              [i + 1, A],
+              [i, A],
+              [i, B],
+              [i + 1, B],
+            ] as const;
+            for (const [k, P] of quad) {
+              const p = run[k];
+              const w = inw[k];
+              pos.push(p.x + w.x * P.o, P.y, p.z + w.z * P.o);
+              nor.push(w.nx * P.no, P.ny, w.nz * P.no);
+              const c = P.cap ? cc : cw;
+              col.push(c.r, c.g, c.b);
+            }
+          }
+        }
+      // posts: at the ends of a stretch and every few cells along it
+      let acc = 0;
+      const post = (p: P2, w: { nx: number; nz: number }) => {
+        const fx = p.x + w.nx * RAIL_T * 0.5;
+        const fz = p.z + w.nz * RAIL_T * 0.5;
+        C.push(part(cyl(0.13, 0.14, RAIL_H + 0.12, 12), t.wallTop, fx, (RAIL_H + 0.12) / 2, fz));
+        C.push(part(ico(0.1, 1), capC, fx, RAIL_H + 0.14, fz));
+      };
+      if (!closed[r]) {
+        post(run[0], inw[0]);
+        post(run[m - 1], inw[m - 1]);
+      }
+      for (let i = 1; i < m - 1; i++) {
+        acc += Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z);
+        if (acc > 3.2) {
+          acc = 0;
+          post(run[i], inw[i]);
+        }
+      }
+    });
+    // low decoration on the walls, well away from the rails: flowers, tiles, crates…
     const rnd = lcg(s.W * 77 + s.H * 3);
     for (let z = 0; z < s.H; z++)
       for (let x = 0; x < s.W; x++) {
-        if (s.ground[z * s.W + x] !== G.Wall) continue;
-        let touches = false;
-        for (const [dx, dz] of [
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ]) {
-          if (!this.playable(x + dx, z + dz)) continue;
-          touches = true;
-          // centre of the edge shared with the playable neighbour, pulled into this cell by half the thickness
-          const ex = x + 0.5 + dx * (0.5 - RAIL_T / 2);
-          const ez = z + 0.5 + dz * (0.5 - RAIL_T / 2);
-          const along = dx === 0; // edge runs along x
-          R.push(part(box(along ? 1 : RAIL_T, RAIL_H, along ? RAIL_T : 1), t.wall, ex, RAIL_H / 2, ez));
-          C.push(part(cyl(RAIL_T / 2, RAIL_T / 2, 1, 10), capC, ex, RAIL_H, ez, along ? 0 : PI / 2, 0, along ? PI / 2 : 0));
-          // the two corners of this edge get a post
-          const cx0 = dx === 0 ? x : x + (dx > 0 ? 1 : 0);
-          const cz0 = dz === 0 ? z : z + (dz > 0 ? 1 : 0);
-          const ends = along
-            ? [
-                [cx0, cz0],
-                [cx0 + 1, cz0],
-              ]
-            : [
-                [cx0, cz0],
-                [cx0, cz0 + 1],
-              ];
-          for (const [px, pz] of ends) {
-            const key = `${px},${pz}`;
-            if (posts.has(key)) continue;
-            posts.add(key);
-            // nudge the post into the wall side so it never sticks out into the green
-            const ox = px - (x + 0.5) > 0 ? -RAIL_T / 2 : RAIL_T / 2;
-            const oz = pz - (z + 0.5) > 0 ? -RAIL_T / 2 : RAIL_T / 2;
-            const fx = along ? px + ox : ex;
-            const fz = along ? ez : pz + oz;
-            C.push(part(cyl(0.13, 0.14, RAIL_H + 0.12, 12), t.wallTop, fx, (RAIL_H + 0.12) / 2, fz));
-            C.push(part(ico(0.1, 1), capC, fx, RAIL_H + 0.14, fz));
-          }
-        }
-        // low decoration on wall cells: flowers, tiles, crates… away from the rails
-        if (!touches && rnd() < 0.5) {
-          const px = x + 0.25 + rnd() * 0.5;
-          const pz = z + 0.25 + rnd() * 0.5;
-          const c1 = t.props[Math.floor(rnd() * t.props.length)];
-          switch (t.surround) {
-            case 'lawn':
-              D.push(part(ico(0.22), t.props[0], px, 0.12, pz, rnd(), 0, 0, 1, 0.7, 1));
-              D.push(part(ico(0.06), t.props[2 + Math.floor(rnd() * 3)], px + 0.1, 0.24, pz));
-              break;
-            case 'street':
-              D.push(part(box(0.3, 0.5, 0.3), 0xa84a32, px, 0.25, pz), part(box(0.36, 0.06, 0.36), 0x5a5050, px, 0.52, pz));
-              break;
-            case 'sea':
-              D.push(part(cyl(0.18, 0.18, 0.4, 10), 0x8a5a30, px, 0.2, pz), part(cyl(0.19, 0.19, 0.04, 10), 0x3a2a1a, px, 0.3, pz));
-              break;
-            case 'fairground':
-              D.push(part(cone(0.16, 0.4, 8), c1, px, 0.2, pz), part(ico(0.06), 0xffffff, px, 0.42, pz));
-              break;
-            case 'ice':
-              D.push(part(ico(0.2), 0xffffff, px, 0.1, pz, rnd(), 0, 0, 1, 0.6, 1));
-              break;
-            case 'magma':
-              D.push(part(dode(0.2), t.props[0], px, 0.12, pz, rnd(), rnd(), 0, 1, 0.8, 1));
-              break;
-            case 'beach':
-              if (rnd() < 0.5) D.push(part(ico(0.13), 0xffb08a, px, 0.05, pz, 0, rnd(), 0, 1, 0.4, 1));
-              else D.push(part(cone(0.12, 0.2, 5), 0xf4ead2, px, 0.08, pz, PI / 2, rnd() * 3, 0));
-              break;
-            case 'desert':
-              D.push(part(cyl(0.12, 0.17, 0.3, 8), 0xc0703a, px, 0.15, pz), part(cyl(0.07, 0.1, 0.08, 8), 0xa85a2a, px, 0.33, pz));
-              break;
-            case 'castle':
-              D.push(part(cyl(0.16, 0.16, 0.34, 10), 0x7a5230, px, 0.17, pz), part(cyl(0.165, 0.165, 0.04, 10), 0x3a3a3a, px, 0.28, pz));
-              break;
-            case 'city':
-              D.push(part(box(0.5, 0.06, 0.06), c1, px, 0.1, pz, 0, rnd() * 3, 0));
-              break;
-            case 'canyon':
-              D.push(part(dode(0.17), t.props[1], px, 0.08, pz, rnd(), rnd(), 0, 1, 0.7, 1));
-              break;
-            case 'space':
-              D.push(part(cyl(0.03, 0.03, 0.4, 6), 0xd8dce6, px, 0.2, pz), part(ico(0.06), 0xff4a3a, px, 0.42, pz));
-              break;
-          }
+        if (s.ground[z * s.W + x] !== G.Wall || s.kind[z * s.W + x]) continue;
+        if (rnd() >= 0.5) continue;
+        const px = x + 0.25 + rnd() * 0.5;
+        const pz = z + 0.25 + rnd() * 0.5;
+        if (s.fineAt(px, pz) !== G.Wall || s.wallDist(px, pz) < 0.42) continue;
+        const c1 = t.props[Math.floor(rnd() * t.props.length)];
+        switch (t.surround) {
+          case 'lawn':
+            D.push(part(ico(0.22), t.props[0], px, 0.12, pz, rnd(), 0, 0, 1, 0.7, 1));
+            D.push(part(ico(0.06), t.props[2 + Math.floor(rnd() * 3)], px + 0.1, 0.24, pz));
+            break;
+          case 'street':
+            D.push(part(box(0.3, 0.5, 0.3), 0xa84a32, px, 0.25, pz), part(box(0.36, 0.06, 0.36), 0x5a5050, px, 0.52, pz));
+            break;
+          case 'sea':
+            D.push(part(cyl(0.18, 0.18, 0.4, 10), 0x8a5a30, px, 0.2, pz), part(cyl(0.19, 0.19, 0.04, 10), 0x3a2a1a, px, 0.3, pz));
+            break;
+          case 'fairground':
+            D.push(part(cone(0.16, 0.4, 8), c1, px, 0.2, pz), part(ico(0.06), 0xffffff, px, 0.42, pz));
+            break;
+          case 'ice':
+            D.push(part(ico(0.2), 0xffffff, px, 0.1, pz, rnd(), 0, 0, 1, 0.6, 1));
+            break;
+          case 'magma':
+            D.push(part(dode(0.2), t.props[0], px, 0.12, pz, rnd(), rnd(), 0, 1, 0.8, 1));
+            break;
+          case 'beach':
+            if (rnd() < 0.5) D.push(part(ico(0.13), 0xffb08a, px, 0.05, pz, 0, rnd(), 0, 1, 0.4, 1));
+            else D.push(part(cone(0.12, 0.2, 5), 0xf4ead2, px, 0.08, pz, PI / 2, rnd() * 3, 0));
+            break;
+          case 'desert':
+            D.push(part(cyl(0.12, 0.17, 0.3, 8), 0xc0703a, px, 0.15, pz), part(cyl(0.07, 0.1, 0.08, 8), 0xa85a2a, px, 0.33, pz));
+            break;
+          case 'castle':
+            D.push(part(cyl(0.16, 0.16, 0.34, 10), 0x7a5230, px, 0.17, pz), part(cyl(0.165, 0.165, 0.04, 10), 0x3a3a3a, px, 0.28, pz));
+            break;
+          case 'city':
+            D.push(part(box(0.5, 0.06, 0.06), c1, px, 0.1, pz, 0, rnd() * 3, 0));
+            break;
+          case 'canyon':
+            D.push(part(dode(0.17), t.props[1], px, 0.08, pz, rnd(), rnd(), 0, 1, 0.7, 1));
+            break;
+          case 'space':
+            D.push(part(cyl(0.03, 0.03, 0.4, 6), 0xd8dce6, px, 0.2, pz), part(ico(0.06), 0xff4a3a, px, 0.42, pz));
+            break;
         }
       }
     const g = new THREE.Group();
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-    for (const list of [R, C, D]) {
+    if (pos.length) {
+      const rg = new THREE.BufferGeometry();
+      rg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      rg.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      rg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      const rail = new THREE.Mesh(rg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }));
+      rail.castShadow = true;
+      rail.receiveShadow = true;
+      g.add(rail);
+    }
+    for (const list of [C, D]) {
       if (!list.length) continue;
-      const m = new THREE.Mesh(merge(list), list === C ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }) : mat);
+      const m = new THREE.Mesh(merge(list), list === C ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }) : new THREE.MeshLambertMaterial({ vertexColors: true }));
       m.castShadow = true;
       m.receiveShadow = true;
       g.add(m);
@@ -786,49 +1124,40 @@ export class LevelView {
     return g;
   }
 
-  /** Ponds: a rippling surface sunk into the plate. */
+  /** Ponds: a rippling surface sunk into the plate, the shape of the pond. */
   private buildWater() {
     const s = this.sim;
-    const quads: THREE.BufferGeometry[] = [];
-    for (let i = 0; i < s.ground.length; i++) {
-      if (s.ground[i] !== G.Water && s.dyn[i] !== 2) continue;
-      const g = new THREE.PlaneGeometry(1, 1);
-      g.rotateX(-PI / 2);
-      g.translate((i % s.W) + 0.5, -0.1, Math.floor(i / s.W) + 0.5);
-      quads.push(g);
+    if (!s.shape.pond.length) return;
+    const geo = new THREE.ShapeGeometry(this.shapes(s.shape.pond), 1);
+    geo.rotateX(-PI / 2);
+    geo.translate(0, -0.1, 0);
+    // world-space UVs so the ripples flow across without seams
+    const pos = geo.attributes.position;
+    const uv = new Float32Array(pos.count * 2);
+    for (let k = 0; k < pos.count; k++) {
+      uv[k * 2] = pos.getX(k) * 0.5;
+      uv[k * 2 + 1] = pos.getZ(k) * 0.5;
     }
-    if (!quads.length) return;
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     this.waterTex = rippleTexture(this.theme.water);
-    this.waterTex.repeat.set(1, 1);
-    const geo = merge(quads.map((q) => {
-      // world-space UVs so the ripples flow across cells without seams
-      const pos = q.attributes.position;
-      const uv = new Float32Array(pos.count * 2);
-      for (let k = 0; k < pos.count; k++) {
-        uv[k * 2] = pos.getX(k) * 0.5;
-        uv[k * 2 + 1] = pos.getZ(k) * 0.5;
-      }
-      q.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-      q.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3).fill(1), 3));
-      return q;
-    }));
     const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: this.waterTex, transparent: true, opacity: 0.92 }));
     m.receiveShadow = true;
     this.inner.add(m);
   }
 
-  /** The cup: a real hole (the green is cut out), a dark liner, a white rim. */
+  /** The cup: a real hole (the green is cut out), a dark liner, a white rim — on top of its mound, if it has one. */
   private buildCup() {
     const s = this.sim;
     const r = s.cupR;
-    const liner = new THREE.Mesh(new THREE.CylinderGeometry(r, r, PIT, 24, 1, true), new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.BackSide }));
-    liner.position.set(s.cup.x, -PIT / 2, s.cup.z);
+    const hy = s.heightAt(s.cup.x, s.cup.z);
+    const liner = new THREE.Mesh(new THREE.CylinderGeometry(r, r, PIT + hy, 24, 1, true), new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.BackSide }));
+    liner.position.set(s.cup.x, (hy - PIT) / 2, s.cup.z);
     const bottom = new THREE.Mesh(new THREE.CircleGeometry(r, 24), new THREE.MeshBasicMaterial({ color: 0x0c0c0c }));
     bottom.rotation.x = -PI / 2;
     bottom.position.set(s.cup.x, -PIT + 0.01, s.cup.z);
     const rim = new THREE.Mesh(new THREE.TorusGeometry(r + 0.015, 0.025, 6, 32), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }));
     rim.rotation.x = PI / 2;
-    rim.position.set(s.cup.x, 0.004, s.cup.z);
+    rim.position.set(s.cup.x, hy + 0.004, s.cup.z);
     this.inner.add(liner, bottom, rim);
   }
 
@@ -837,63 +1166,134 @@ export class LevelView {
     const s = this.sim;
     const P: Part[] = [];
     const rnd = lcg(s.W * 31 + s.H);
-    const solid = (x: number, z: number) => x >= 0 && z >= 0 && x < s.W && z < s.H && s.ground[z * s.W + x] !== G.Void;
-    for (let z = 0; z < s.H; z++)
-      for (let x = 0; x < s.W; x++) {
-        if (!solid(x, z)) continue;
-        for (const [dx, dz] of [
-          [0, 1],
-          [1, 0],
-          [-1, 0],
-          [0, -1],
-        ]) {
-          if (solid(x + dx, z + dz)) continue;
-          for (let fl = 0; fl < 4; fl++) {
-            if (rnd() < 0.35) continue;
-            const y = -1.4 - fl * 2;
-            const c = rnd() < 0.6 ? 0xffd27a : 0x3a3a4a;
-            const px = x + 0.5 + dx * 0.51;
-            const pz = z + 0.5 + dz * 0.51;
-            P.push(part(box(dx ? 0.02 : 0.5, 0.7, dz ? 0.02 : 0.5), c, px, y, pz));
-          }
+    const pts = s.shape.land.flatMap((l) => (l.area > 0 ? [l.pts] : []));
+    for (const lp of pts) {
+      let acc = 0;
+      for (let i = 0; i < lp.length; i++) {
+        const a = lp[i];
+        const b = lp[(i + 1) % lp.length];
+        const L = Math.hypot(b.x - a.x, b.z - a.z);
+        acc += L;
+        if (acc < 0.9 || L < 1e-6) continue;
+        acc = 0;
+        // facing out of the building (the plate is on the right of its outline)
+        const nx = (b.z - a.z) / L;
+        const nz = -(b.x - a.x) / L;
+        const ang = Math.atan2(nx, nz);
+        for (let fl = 0; fl < 4; fl++) {
+          if (rnd() < 0.35) continue;
+          const c = rnd() < 0.6 ? 0xffd27a : 0x3a3a4a;
+          P.push(part(box(0.5, 0.7, 0.02), c, b.x + nx * 0.02, -1.4 - fl * 2, b.z + nz * 0.02, 0, ang, 0));
         }
       }
+    }
     if (!P.length) return new THREE.Group();
     return new THREE.Mesh(merge(P), new THREE.MeshBasicMaterial({ vertexColors: true }));
+  }
+
+  /** Path of a set of outlines on the painted canvas. */
+  private path(loops: { pts: P2[] }[], frame = false) {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    if (frame) ctx.rect(-PX, -PX, this.canvas.width + PX * 2, this.canvas.height + PX * 2);
+    for (const l of loops) {
+      l.pts.forEach((p, i) => (i ? ctx.lineTo(p.x * PX, p.z * PX) : ctx.moveTo(p.x * PX, p.z * PX)));
+      ctx.closePath();
+    }
+  }
+
+  /** Paint the cells near a region (kind) inside its smooth outline only. */
+  private paintRegion(loops: { pts: P2[] }[], kind: number, cells: (x: number, z: number) => boolean, rnd: () => number) {
+    if (!loops.length) return;
+    const s = this.sim;
+    const ctx = this.ctx;
+    ctx.save();
+    this.path(loops);
+    ctx.clip('evenodd');
+    for (let z = 0; z < s.H; z++)
+      for (let x = 0; x < s.W; x++) {
+        let near = false;
+        for (let dz = -1; dz <= 1 && !near; dz++) for (let dx = -1; dx <= 1; dx++) if (cells(x + dx, z + dz)) near = true;
+        if (near) this.paintBase(x, z, kind, rnd);
+      }
+    ctx.restore();
   }
 
   private paint() {
     const s = this.sim;
     const ctx = this.ctx;
     const rnd = lcg(s.W * 977 + s.H * 13 + 5);
+    const at = (x: number, z: number) => (x < 0 || z < 0 || x >= s.W || z >= s.H ? G.Void : s.ground[z * s.W + x]);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    for (let z = 0; z < s.H; z++) for (let x = 0; x < s.W; x++) this.paintCell(x, z, rnd);
-    // soft shadow along the rails (ambient occlusion), painted over the playing surface
-    for (let z = 0; z < s.H; z++)
-      for (let x = 0; x < s.W; x++) {
-        if (!this.playable(x, z)) continue;
-        for (const [dx, dz] of [
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ]) {
-          const nx = x + dx;
-          const nz = z + dz;
-          if (nx < 0 || nz < 0 || nx >= s.W || nz >= s.H || s.ground[nz * s.W + nx] !== G.Wall) continue;
-          const px = x * PX;
-          const pz = z * PX;
-          const w = PX * 0.3;
-          const gx0 = dx > 0 ? px + PX : dx < 0 ? px : px;
-          const gz0 = dz > 0 ? pz + PX : dz < 0 ? pz : pz;
-          const g = dx ? ctx.createLinearGradient(gx0, 0, gx0 - dx * w, 0) : ctx.createLinearGradient(0, gz0, 0, gz0 - dz * w);
-          g.addColorStop(0, 'rgba(0,0,0,0.28)');
-          g.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = g;
-          if (dx) ctx.fillRect(dx > 0 ? px + PX - w : px, pz, w, PX);
-          else ctx.fillRect(px, dz > 0 ? pz + PX - w : pz, PX, w);
-        }
+    // the playing surface everywhere, then the bunkers, the ice and the rough around the rails in their own shapes
+    for (let z = 0; z < s.H; z++) for (let x = 0; x < s.W; x++) if (at(x, z) !== G.Void) this.paintBase(x, z, G.Green, rnd);
+    this.paintRegion(s.shape.ice, G.Ice, (x, z) => at(x, z) === G.Ice, rnd);
+    this.paintRegion(s.shape.sand, G.Sand, (x, z) => at(x, z) === G.Sand, rnd);
+    this.paintRegion(s.shape.walls, G.Wall, (x, z) => at(x, z) === G.Wall, rnd);
+    for (let z = 0; z < s.H; z++) for (let x = 0; x < s.W; x++) if (this.playable(x, z)) this.paintOverlay(x, z);
+    // mounds: lit on the sun's side, in shade on the other, with a darker foot
+    for (const h of s.hills) {
+      const cx = h.x * PX;
+      const cz = h.z * PX;
+      const R = h.r * PX;
+      const lit = ctx.createRadialGradient(cx - R * 0.3, cz + R * 0.25, 0, cx, cz, R);
+      lit.addColorStop(0, 'rgba(255,255,230,0.22)');
+      lit.addColorStop(0.55, 'rgba(255,255,230,0.05)');
+      lit.addColorStop(1, 'rgba(255,255,230,0)');
+      ctx.fillStyle = lit;
+      ctx.beginPath();
+      ctx.arc(cx, cz, R, 0, PI * 2);
+      ctx.fill();
+      const shade2 = ctx.createRadialGradient(cx + R * 0.35, cz - R * 0.3, R * 0.2, cx, cz, R);
+      shade2.addColorStop(0, 'rgba(0,0,0,0)');
+      shade2.addColorStop(0.75, 'rgba(0,20,0,0.1)');
+      shade2.addColorStop(1, 'rgba(0,20,0,0)');
+      ctx.fillStyle = shade2;
+      ctx.beginPath();
+      ctx.arc(cx, cz, R, 0, PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,30,0,0.12)';
+      ctx.lineWidth = 2;
+      for (const k of [0.45, 0.78]) {
+        ctx.beginPath();
+        ctx.arc(cx, cz, R * k, 0, PI * 2);
+        ctx.stroke();
       }
+    }
+    // soft shadow along the rails (ambient occlusion), on the playing side only
+    if (s.shape.walls.length) {
+      ctx.save();
+      this.path(s.shape.walls, true);
+      ctx.clip('evenodd');
+      this.path(s.shape.walls);
+      ctx.lineJoin = 'round';
+      for (const [w, a] of [
+        [0.56, 0.07],
+        [0.38, 0.08],
+        [0.2, 0.1],
+      ]) {
+        ctx.lineWidth = w * PX;
+        ctx.strokeStyle = `rgba(0,0,0,${a})`;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // cut out the ponds and everything off the plate
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    if (s.shape.pond.length) {
+      // (not under the walls: the ponds' square corners hide there)
+      ctx.save();
+      this.path(s.shape.walls, true);
+      ctx.clip('evenodd');
+      this.path(s.shape.pond);
+      ctx.fill('evenodd');
+      ctx.restore();
+    }
+    this.path(s.shape.land, true);
+    ctx.fill('evenodd');
+    ctx.restore();
     // the cup: cut a hole (transparent) with a darker collar around it
     const cx = s.cup.x * PX;
     const cz = s.cup.z * PX;
@@ -903,25 +1303,34 @@ export class LevelView {
     ctx.fill();
     ctx.save();
     ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
     ctx.beginPath();
     ctx.arc(cx, cz, s.cupR * PX, 0, PI * 2);
     ctx.fill();
     ctx.restore();
-    // tunnels: a hole with a glowing collar, like the cup
+    // tunnels: a hole with a collar, like the cup
     s.portals.forEach((p, k) => {
-      const c = k < 2 ? (this.theme.glow ?? 0x36e0ff) : 0xff8a3a;
-      const col = '#' + c.toString(16).padStart(6, '0');
       const gx = p.x * PX;
       const gz = p.z * PX;
-      const g = ctx.createRadialGradient(gx, gz, PX * 0.3, gx, gz, PX * 0.55);
-      g.addColorStop(0, col);
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(gx, gz, PX * 0.55, 0, PI * 2);
-      ctx.fill();
+      if (this.pipes) {
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.beginPath();
+        ctx.arc(gx, gz, PX * 0.5, 0, PI * 2);
+        ctx.fill();
+      } else {
+        const c = k < 2 ? (this.theme.glow ?? 0x36e0ff) : 0xff8a3a;
+        const col = '#' + c.toString(16).padStart(6, '0');
+        const g = ctx.createRadialGradient(gx, gz, PX * 0.3, gx, gz, PX * 0.55);
+        g.addColorStop(0, col);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(gx, gz, PX * 0.55, 0, PI * 2);
+        ctx.fill();
+      }
       ctx.save();
       ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = '#000';
       ctx.beginPath();
       ctx.arc(gx, gz, PX * 0.34, 0, PI * 2);
       ctx.fill();
@@ -931,29 +1340,26 @@ export class LevelView {
     const tx = s.tee.x * PX;
     const tz = s.tee.z * PX;
     ctx.fillStyle = 'rgba(20,60,30,0.35)';
-    ctx.fillRect(tx - PX * 0.45, tz - PX * 0.45, PX * 0.9, PX * 0.9);
+    ctx.beginPath();
+    ctx.roundRect(tx - PX * 0.45, tz - PX * 0.45, PX * 0.9, PX * 0.9, PX * 0.18);
+    ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,0.55)';
     ctx.lineWidth = 2;
-    ctx.strokeRect(tx - PX * 0.45, tz - PX * 0.45, PX * 0.9, PX * 0.9);
+    ctx.stroke();
   }
 
-  private paintCell(x: number, z: number, rnd: () => number) {
+  /** The texture of one kind of ground over a whole cell (green or the course's floor, sand, ice, the rough). */
+  private paintBase(x: number, z: number, kind: number, rnd: () => number) {
     const s = this.sim;
     const t = this.theme;
     const ctx = this.ctx;
-    const i = z * s.W + x;
-    const g = s.ground[i];
     const px = x * PX;
     const pz = z * PX;
-    ctx.clearRect(px, pz, PX, PX);
     const dots = (c: string, n: number, w = 2, h = 2) => {
       ctx.fillStyle = c;
       for (let k = 0; k < n; k++) ctx.fillRect(px + rnd() * (PX - w), pz + rnd() * (PX - h), w, h);
     };
-    switch (g) {
-      case G.Void:
-      case G.Water:
-        return;
+    switch (kind) {
       case G.Wall: {
         // rough ground around the rails
         ctx.fillStyle = t.rough[0];
@@ -969,55 +1375,6 @@ export class LevelView {
         } else dots(t.rough[1], 22, 3, 3);
         return;
       }
-      case G.Green: {
-        const dy = s.dyn[i];
-        // drawbridge: the bridge itself is the surface (water below it)
-        if (dy === 2) {
-          ctx.clearRect(px, pz, PX, PX);
-          return;
-        }
-        if (dy === 1) {
-          // wet sand that the tide covers: darker, with ripple marks
-          ctx.fillStyle = shade(t.sand, 0.8);
-          ctx.fillRect(px, pz, PX, PX);
-          ctx.strokeStyle = shade(t.sand, 0.68);
-          ctx.lineWidth = 1.5;
-          for (let k = 1; k < 5; k++) {
-            ctx.beginPath();
-            ctx.moveTo(px, pz + (k * PX) / 5);
-            for (let u = 0; u <= PX; u += 6) ctx.lineTo(px + u, pz + (k * PX) / 5 + Math.sin((u + x * PX) * 0.25) * 1.5);
-            ctx.stroke();
-          }
-          dots('rgba(255,255,255,0.35)', 5, 2, 2);
-          break;
-        }
-        if (t.floor && t.floor !== 'grass' && t.floor !== 'deck') {
-          this.paintFloor(px, pz, x, z, rnd);
-          break;
-        }
-        if (t.surround === 'sea') {
-          for (let k = 0; k < 4; k++) {
-            ctx.fillStyle = shade(t.green[k % 2], 0.94 + ((x * 7 + k * 3) % 5) * 0.03);
-            ctx.fillRect(px + k * (PX / 4), pz, PX / 4, PX);
-            ctx.fillStyle = shade(t.green[0], 0.68);
-            ctx.fillRect(px + k * (PX / 4), pz, 1.5, PX);
-          }
-          if ((z + x) % 3 === 0) {
-            ctx.fillStyle = shade(t.green[0], 0.6);
-            ctx.fillRect(px + 4, pz + PX - 3, PX - 8, 1.5);
-            ctx.fillStyle = 'rgba(40,30,20,0.6)';
-            ctx.fillRect(px + PX * 0.12, pz + PX - 6, 3, 3);
-          }
-        } else {
-          // mowed stripes, two cells wide, with a soft grain
-          const base = t.green[Math.floor(z / 2) % 2];
-          ctx.fillStyle = base;
-          ctx.fillRect(px, pz, PX, PX);
-          dots(shade(base, 1.07), 14, 1, 3);
-          dots(shade(base, 0.92), 14, 1, 3);
-        }
-        break;
-      }
       case G.Sand:
         ctx.fillStyle = t.sand;
         ctx.fillRect(px, pz, PX, PX);
@@ -1032,7 +1389,7 @@ export class LevelView {
           ctx.quadraticCurveTo(px + PX / 2, pz + (k * PX) / 4 + 3, px + PX, pz + (k * PX) / 4 + Math.sin(x + k + 1) * 2);
           ctx.stroke();
         }
-        break;
+        return;
       case G.Ice: {
         const gr = ctx.createLinearGradient(px, pz, px + PX, pz + PX);
         gr.addColorStop(0, shade(t.ice, 1.05));
@@ -1052,13 +1409,60 @@ export class LevelView {
         }
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
         ctx.fillRect(px + 4, pz + 4, PX * 0.35, 3);
-        break;
+        return;
       }
-      case G.Lava:
-        // drawn by the lava tiles on top: keep the green underneath
-        ctx.fillStyle = t.green[0];
-        ctx.fillRect(px, pz, PX, PX);
-        break;
+    }
+    // green (or the course's own floor)
+    if (t.floor && t.floor !== 'grass' && t.floor !== 'deck') {
+      this.paintFloor(px, pz, x, z, rnd);
+      return;
+    }
+    if (t.surround === 'sea') {
+      for (let k = 0; k < 4; k++) {
+        ctx.fillStyle = shade(t.green[k % 2], 0.94 + ((x * 7 + k * 3) % 5) * 0.03);
+        ctx.fillRect(px + k * (PX / 4), pz, PX / 4, PX);
+        ctx.fillStyle = shade(t.green[0], 0.68);
+        ctx.fillRect(px + k * (PX / 4), pz, 1.5, PX);
+      }
+      if ((z + x) % 3 === 0) {
+        ctx.fillStyle = shade(t.green[0], 0.6);
+        ctx.fillRect(px + 4, pz + PX - 3, PX - 8, 1.5);
+        ctx.fillStyle = 'rgba(40,30,20,0.6)';
+        ctx.fillRect(px + PX * 0.12, pz + PX - 6, 3, 3);
+      }
+      return;
+    }
+    // mowed stripes, two cells wide, with a soft grain
+    const base = t.green[Math.floor(z / 2) % 2];
+    ctx.fillStyle = base;
+    ctx.fillRect(px, pz, PX, PX);
+    dots(shade(base, 1.07), 14, 1, 3);
+    dots(shade(base, 0.92), 14, 1, 3);
+    void s;
+  }
+
+  /** What is painted over a playable cell: wet sand, slopes, boosters, the portcullises' groove. */
+  private paintOverlay(x: number, z: number) {
+    const s = this.sim;
+    const t = this.theme;
+    const ctx = this.ctx;
+    const i = z * s.W + x;
+    const px = x * PX;
+    const pz = z * PX;
+    if (s.dyn[i] === 1) {
+      // wet sand that the tide covers: darker, with ripple marks
+      ctx.fillStyle = shade(t.sand, 0.8);
+      ctx.fillRect(px, pz, PX, PX);
+      ctx.strokeStyle = shade(t.sand, 0.68);
+      ctx.lineWidth = 1.5;
+      for (let k = 1; k < 5; k++) {
+        ctx.beginPath();
+        ctx.moveTo(px, pz + (k * PX) / 5);
+        for (let u = 0; u <= PX; u += 6) ctx.lineTo(px + u, pz + (k * PX) / 5 + Math.sin((u + x * PX) * 0.25) * 1.5);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      for (let k = 0; k < 5; k++) ctx.fillRect(px + ((k * 17 + x * 7) % PX), pz + ((k * 29 + z * 11) % PX), 2, 2);
     }
     // slopes: white chevrons pointing downhill, plus a subtle light/dark gradient
     const sl = s.slope[i];
@@ -1204,27 +1608,49 @@ export class LevelView {
     }
   }
 
-  /** Lava tiles for every lava cell (the volcano adds more after each putt). */
+  /** Lava: one glowing sheet, masked to the molten cells (rounded where the flow ends), never over the walls. */
   private syncLava() {
     const s = this.sim;
-    if (!this.lavaMesh) return;
-    let n = 0;
-    for (let i = 0; i < s.ground.length; i++) {
-      if (s.ground[i] !== G.Lava) continue;
-      this.m4.makeTranslation((i % s.W) + 0.5, 0.012, Math.floor(i / s.W) + 0.5);
-      this.lavaMesh.setMatrixAt(n++, this.m4);
+    if (!this.lavaMesh || !this.lavaMask) return;
+    const lava = (x: number, z: number) => x >= 0 && z >= 0 && x < s.W && z < s.H && s.ground[z * s.W + x] === G.Lava;
+    const c = this.lavaMask;
+    const g = c.getContext('2d')!;
+    const k = LAVA_PX;
+    g.clearRect(0, 0, c.width, c.height);
+    g.fillStyle = '#fff';
+    const cells: P2[] = [];
+    for (let z = 0; z < s.H; z++)
+      for (let x = 0; x < s.W; x++) {
+        if (!lava(x, z)) continue;
+        cells.push({ x: x + 0.5, z: z + 0.5 });
+        const corner = (dx: number, dz: number) => (lava(x + dx, z) || lava(x, z + dz) ? 0 : k * 0.38);
+        g.beginPath();
+        g.roundRect(x * k - 0.5, z * k - 0.5, k + 1, k + 1, [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]);
+        g.fill();
+      }
+    // never over the walls
+    g.save();
+    g.globalCompositeOperation = 'destination-out';
+    g.scale(k / PX, k / PX);
+    g.beginPath();
+    for (const l of s.shape.walls) {
+      l.pts.forEach((p, i) => (i ? g.lineTo(p.x * PX, p.z * PX) : g.moveTo(p.x * PX, p.z * PX)));
+      g.closePath();
     }
-    if (n > this.lavaCount && this.lavaCount > 0 && this.tier !== 'low') {
+    g.fill('evenodd');
+    g.restore();
+    this.lavaMaskTex!.needsUpdate = true;
+    const n = cells.length;
+    if (n > this.lavaCells.length && this.lavaCells.length > 0 && this.tier !== 'low') {
       // new lava: a burst of sparks over the freshly molten cells
-      for (let k = this.lavaCount; k < n; k++) {
-        this.lavaMesh.getMatrixAt(k, this.m4);
-        const e = this.m4.elements;
-        for (let j = 0; j < 4; j++) this.sparks.add({ x: e[12] + Math.random() - 0.5, y: 0.1, z: e[14] + Math.random() - 0.5, vy: 1.5 + Math.random() * 2, life: 0.8, s0: 0.15, s1: 0.04, r: 1, g: 0.5, b: 0.15, grav: 3 });
+      for (const p of cells) {
+        if (this.lavaCells.some((q) => q.x === p.x && q.z === p.z)) continue;
+        for (let j = 0; j < 4; j++) this.sparks.add({ x: p.x + Math.random() - 0.5, y: 0.1, z: p.z + Math.random() - 0.5, vy: 1.5 + Math.random() * 2, life: 0.8, s0: 0.15, s1: 0.04, r: 1, g: 0.5, b: 0.15, grav: 3 });
       }
     }
+    this.lavaCells = cells;
     this.lavaCount = n;
-    this.lavaMesh.count = n;
-    this.lavaMesh.instanceMatrix.needsUpdate = true;
+    this.lavaMesh.visible = n > 0;
   }
 
   private buildSurround() {
@@ -1593,7 +2019,8 @@ export class LevelView {
     this.shown.x += (b.x - this.shown.x) * kf;
     this.shown.z += (b.z - this.shown.z) * kf;
     const inCup = Math.hypot(this.shown.x - s.cup.x, this.shown.z - s.cup.z) < s.cupR;
-    const y = BALL_R + b.y;
+    const hy = s.heightAt(this.shown.x, this.shown.z);
+    const y = BALL_R + b.y + hy;
     this.ball.position.set(this.shown.x, y, this.shown.z);
     const sp = Math.hypot(b.vx, b.vz);
     if (sp > 0.01) {
@@ -1604,7 +2031,7 @@ export class LevelView {
     const q = Math.sin(this.squash * PI) * 0.22;
     this.ball.scale.set(1 + q * Math.abs(Math.cos(this.squashDir)), 1 - q * 0.6, 1 + q * Math.abs(Math.sin(this.squashDir)));
     this.ball.visible = b.y > -1.2;
-    this.ballShadow.position.set(this.shown.x + 0.04, 0.004, this.shown.z + 0.05);
+    this.ballShadow.position.set(this.shown.x + 0.04, 0.004 + hy, this.shown.z + 0.05);
     this.ballShadow.visible = b.y > -0.05 && !inCup;
     // trail when it flies (the ball's own colour; the comet always burns)
     if ((sp > 6 || (this.comet && sp > 1.5)) && this.tier !== 'low') {
@@ -1618,7 +2045,7 @@ export class LevelView {
     // ---- flag: waves in the wind, pops up (with a spin) when the ball drops ----
     const want = s.state === 'sunk' || s.state === 'done' ? (s.result && !s.result.maxed ? 1 : s.state === 'sunk' ? 1 : 0) : 0;
     this.flagUp += (want - this.flagUp) * Math.min(1, dt * 7);
-    this.flag.position.y = this.flagUp * 0.9 + Math.sin(this.flagUp * PI) * 0.25;
+    this.flag.position.y = this.cupY + this.flagUp * 0.9 + Math.sin(this.flagUp * PI) * 0.25;
     if (want) this.flagSpin += dt * 9 * (1 - this.flagUp * 0.7);
     this.flag.rotation.y = this.flagSpin;
     const pos = this.flagCloth.geometry.attributes.position as THREE.BufferAttribute;
@@ -1629,6 +2056,7 @@ export class LevelView {
     pos.needsUpdate = true;
     // ---- obstacles ----
     s.spinners.forEach((sp2, k) => (this.spinners[k].rotation.y = -s.spinnerAngle(sp2, s.time)));
+    s.mills.forEach((m, k) => (this.sails[k].rotation.z = s.millAngle(m, s.time)));
     s.movers.forEach((m, k) => {
       const p = s.moverPos(m, s.time);
       this.movers[k].position.set(p.x, 0, p.z);
@@ -1671,7 +2099,7 @@ export class LevelView {
     this.coinMeshes.forEach((m, k) => {
       m.visible = !s.coinsGot.includes(k);
       m.rotation.y = time * 2.4 + k;
-      m.position.y = 0.32 + Math.sin(time * 3 + k) * 0.05;
+      m.position.y = 0.32 + Math.sin(time * 3 + k) * 0.05 + this.coinY[k];
     });
     // ---- liquids ----
     if (this.waterTex) this.waterTex.offset.set(time * 0.04, time * 0.025);
@@ -1683,10 +2111,8 @@ export class LevelView {
       if (n !== this.lavaCount) this.syncLava();
       if (this.lavaLight) this.lavaLight.intensity = 7 + Math.sin(time * 5) * 1.5 + Math.min(10, n * 0.3);
       if (this.tier !== 'low' && n && Math.random() < dt * 14) {
-        const k = Math.floor(Math.random() * n);
-        this.lavaMesh!.getMatrixAt(k, this.m4);
-        const e = this.m4.elements;
-        this.sparks.add({ x: e[12] + Math.random() - 0.5, y: 0.1, z: e[14] + Math.random() - 0.5, vy: 1 + Math.random(), life: 1.2, s0: 0.1, s1: 0.03, r: 1, g: 0.55, b: 0.2 });
+        const c = this.lavaCells[Math.floor(Math.random() * this.lavaCells.length)];
+        if (c) this.sparks.add({ x: c.x + Math.random() - 0.5, y: 0.1, z: c.z + Math.random() - 0.5, vy: 1 + Math.random(), life: 1.2, s0: 0.1, s1: 0.03, r: 1, g: 0.55, b: 0.2 });
       }
     }
     // glints on the sea
@@ -1741,19 +2167,20 @@ export class LevelView {
     const ox = this.swing >= 0 ? this.swingFrom.x : b.x;
     const oz = this.swing >= 0 ? this.swingFrom.z : b.z;
     const back = BALL_R + 0.1 + pull;
-    this.putter.position.set(ox - dx * back, 0, oz - dz * back);
+    this.putter.position.set(ox - dx * back, s.heightAt(ox - dx * back, oz - dz * back), oz - dz * back);
     // the face looks along the putt; the shaft leans back towards the player
     this.putter.rotation.y = -angle;
     this.putterHead.rotation.z = this.swing >= 0 ? -0.15 : Math.min(0.5, pull * 0.35);
     this.putter.scale.setScalar(1.35 * Math.max(0.05, this.swing >= 0 ? alpha : this.putterFade));
   }
   private swingFrom = { x: 0, z: 0 };
+  private cupY = 0;
 
   private updateAim(time: number) {
     const s = this.sim;
     const a = this.aim;
     const rm = this.ring.material as THREE.MeshBasicMaterial;
-    this.ring.position.set(s.ball.x, 0.01, s.ball.z);
+    this.ring.position.set(s.ball.x, 0.01 + s.heightAt(s.ball.x, s.ball.z), s.ball.z);
     if (!a || s.state !== 'aim') {
       this.dots.forEach((d) => (d.visible = false));
       this.ghost.visible = false;
@@ -1788,14 +2215,16 @@ export class LevelView {
       while (j < seg.length - 1 && seg[j] < d) j++;
       const u = (d - seg[j - 1]) / Math.max(1e-6, seg[j] - seg[j - 1]);
       dot.visible = true;
-      dot.position.set(pts[j - 1].x + (pts[j].x - pts[j - 1].x) * u, 0.07, pts[j - 1].z + (pts[j].z - pts[j - 1].z) * u);
+      const dx2 = pts[j - 1].x + (pts[j].x - pts[j - 1].x) * u;
+      const dz2 = pts[j - 1].z + (pts[j].z - pts[j - 1].z) * u;
+      dot.position.set(dx2, 0.07 + s.heightAt(dx2, dz2), dz2);
       dot.scale.setScalar(1 - (d / total) * 0.45);
       this.dotMats[k].color.copy(col);
       this.dotMats[k].opacity = (idle ? 0.45 : 0.95) * (1 - (d / total) * 0.6);
     }
     const last = pts[pts.length - 1];
     this.ghost.visible = !idle && pts.length > 1;
-    this.ghost.position.set(last.x, 0.02, last.z);
+    this.ghost.position.set(last.x, 0.02 + s.heightAt(last.x, last.z), last.z);
     (this.ghost.material as THREE.MeshBasicMaterial).color.copy(col);
   }
 
@@ -1890,6 +2319,14 @@ export class LevelView {
       case 'coin':
         this.burst(x, 0.35, z, 16, 1, 0.82, 0.25, 2.2, 0.5);
         break;
+      case 'mill':
+        this.burst(x, 0.3, z, 8, 1, 0.95, 0.85, 2, 0.35);
+        this.squash = 0.8;
+        this.squashDir = Math.atan2(s.ball.vz, s.ball.vx);
+        break;
+      case 'loop':
+        if (ev.n) this.shake = Math.max(this.shake, 0.05);
+        break;
     }
   }
 
@@ -1915,6 +2352,7 @@ export class LevelView {
     this.waterTex?.dispose();
     this.seaTex?.dispose();
     this.lavaTex?.dispose();
+    this.lavaMaskTex?.dispose();
     this.tideTex?.dispose();
     this.swirlTex?.dispose();
     this.group.traverse((o) => {

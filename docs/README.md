@@ -13,6 +13,28 @@ Lo técnico (estructura, comandos, Android, controles, cómo se hace un hoyo) es
 
 **El estado actual (Google Play, CrazyGames, web y lo pendiente) está en [`nocodeboy-games/docs/versiones.md`](https://github.com/Nocodeboy/nocodeboy-games/blob/main/docs/versiones.md)**, la única fuente del estudio. Aquí queda la historia de cómo se hizo y las decisiones; los detalles de cada envío a las tiendas, en [publicar.md](publicar.md).
 
+## 1.1.0: curvas y clásicos del minigolf (7 oct 2026)
+
+Feedback de Germán con la 1.0.0 ya en Google Play: «está guay, pero que todos los escenarios sean tan cuadrados es raro en minigolf (no hay curvas); se echan en falta las típicas cosas de los campos de minigolf: rampas, túneles, molinos…».
+
+- **Curvas en todo.** Los mapas siguen siendo ASCII, pero el juego los redondea (`src/sim/shape.ts`). Las esquinas llevan filetes: anchos por fuera de un giro, más cerrados por dentro y concéntricos cuando el giro tiene las dos esquinas, así que una curva de pasillo se ve como una curva de verdad. Las escaleras de casillas pasan a ser rampas rectas, los finales de pasillo son semicírculos y las paredes sueltas, postes redondos. No toca el hoyo, el tee, las monedas ni las piezas.
+- **Física sobre las curvas.** La bola rebota en los segmentos y arcos de los contornos (normales exactas) y el suelo se mira en una rejilla fina de 1/8 de casilla, así que agua, arena, hielo y vacío coinciden con lo que se ve. Si un bloque móvil empuja la bola contra una pared, la pared manda y la bola sale por un lado.
+- **Render nuevo.** Base extruida con el contorno, barandillas de sección redondeada a lo largo de las curvas, estanques, búnkeres y lava con forma de mancha, y el agujero del hoyo por fin hueco de verdad (antes se pintaba encima).
+- **Los clásicos del minigolf en los 12 recorridos:**
+  - **Molino:** casa con puerta y cuatro aspas que la tapan a ratos; aparece cruzando el pasillo o suelto en un green abierto.
+  - **Rizo:** con fuerza da la vuelta y sigue; si no, vuelve rodando.
+  - **Colinas**, y el hoyo en lo alto de un **volcán**.
+  - **Tubos-túnel**, con un color por pareja.
+  - **Puentes de madera con barandilla** sobre un arroyo.
+  - **Saltos sobre el agua** con rampas.
+
+  Cada recorrido tiene su reparto (tabla `CLASSIC` en `gen.ts`) y un hoyo lleva como mucho una pieza grande.
+- **Trazados nuevos:** curva larga, ese, horquilla y green redondo. Los huecos sin nada que quedan encerrados entre paredes pasan a ser macizos.
+- **El hoyo 6 (3.ª visita al jardín) es ahora «El molino»**, para que se vea pronto. Los molinetes de la feria (aspas horizontales) se renombran «El molinete» y «Doble molinete».
+- **Pares medidos de nuevo:** 2:27, 3:66, 4:20, 5:7, ningún hoyo fuera de los criterios ([dificultad.md](dificultad.md)). El reto diario está regenerado.
+- **Herramientas nuevas:** `tools/physcheck.ts`, `tools/shapes-svg.ts`, `tools/shots.py` y `tools/testshots.py` (con `tools/testholes/*.json`).
+- **Tienda:** 6 capturas nuevas de Play (molino, rizo, cañón, volcán, neón y puente), gráfico, `og.png` y portadas de CrazyGames rehechos con el aspecto nuevo.
+
 ## Cómo se llegó a la 1.0.0
 
 Germán aprobó la 0.2.0 («Este sí que pasa el corte») y pidió la versión de producción con el patrón de la casa. Envío a las tiendas, en [publicar.md](publicar.md) §4 y §6.

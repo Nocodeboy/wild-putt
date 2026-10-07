@@ -10,7 +10,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { execSync } from 'node:child_process';
 
 const prod = !process.argv.includes('--dev');
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const GAME_URL = process.env.GAME_URL ?? 'https://wild-putt.vercel.app';
 // CrazyGames shows no ads during Basic Launch and rejects games whose rewarded buttons do nothing, so the
 // CrazyGames build ships without ad buttons unless CG_ADS=1 (turn it on once the game reaches Full Launch).

@@ -188,3 +188,34 @@ Las monedas solo compran bolas (aspecto) y la línea de tiro más larga, que no 
 - AdMob: cuando la app esté publicada, vincularla a Google Play en AdMob (*Añadir tienda*) para que pase la revisión de AdMob y sirva anuncios sin límite.
 - Cuando esté publicada: `playLive: true` en los `src/crosspromo.ts` de los otros juegos y en la página del estudio (§5).
 - Capturas de tableta (opcionales): se pueden añadir las mismas seis para tabletas de 7 y 10 pulgadas.
+
+## 7. Actualización 1.1.0: curvas y clásicos del minigolf (preparada el 7 oct 2026)
+
+Todo listo en la rama `curvas-y-clasicos`. **Nada publicado todavía:** al juntarla con `main` la web se publica sola, así que se espera al OK de Germán. Igual para el envío a Google Play.
+
+**Google Play** (Producción → Crear versión nueva):
+1. AAB `wild-putt-1.1.0.aab` (versionCode **10100**), firmado con la misma clave de subida. Copia en `publicacion\wild-putt\google-play\`.
+2. Notas de la versión:
+
+   *en-US*
+   ```
+   Mini golf, now with curves!
+   • Every hole has smooth, rounded walls and edges
+   • Classic mini golf across all 12 courses: windmills, loop-the-loops, hills and volcano cups, pipe tunnels, wooden bridges and jumps over the water
+   • New curvy fairways: sweeping bends, snakes, hairpins and round greens
+   • Pars re-measured on all 120 holes
+   ```
+   *es-ES* (y la misma en *es-419*)
+   ```
+   ¡El minigolf ahora tiene curvas!
+   • Paredes y bordes redondeados en todos los hoyos
+   • Los clásicos del minigolf en los 12 recorridos: molinos, rizos, colinas y hoyos-volcán, tubos-túnel, puentes de madera y saltos sobre el agua
+   • Trazados nuevos: curvas largas, eses, horquillas y greens redondos
+   • Pares medidos de nuevo en los 120 hoyos
+   ```
+3. Ficha (inglés, es-ES y es-419): cambiar las seis capturas por las de `assets/play/` (molino, rizo, cañón, volcán, neón, puente; en ese orden) y el gráfico de cabecera. Los textos no cambian.
+4. Lanzamiento completo en los mismos países. Enviar a revisión **solo con el OK de Germán**.
+
+**Web:** al juntar la rama con `main`, Vercel publica la 1.1.0 (también `og.png`). **CrazyGames:** el zip y las portadas nuevas sustituyen a los de la 1.0.0 cuando se suba.
+
+Detalle: el reto diario cambia de hoyos con la actualización (las semillas se han vuelto a comprobar). Durante unos días, quien no haya actualizado la app juega otro diario con el mismo número.

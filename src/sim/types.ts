@@ -25,6 +25,12 @@ export interface MoverDef {
   phase?: number; // 0..1
 }
 
+/** A windmill whose sails sweep past the door ('W'). */
+export interface MillDef {
+  speed: number; // rad/s
+  phase?: number;
+}
+
 export interface HoleDef {
   id: string;
   name: Txt;
@@ -47,6 +53,10 @@ export interface HoleDef {
   gravity?: number;
   /** coins lying on the green (cell centres) */
   coins?: [number, number][];
+  /** mounds: [x, z, radius, height] (cells); the cup can sit on top of one */
+  hills?: [number, number, number, number][];
+  /** windmills, one per 'W' in reading order */
+  mills?: MillDef[];
   /** the course it belongs to (generated holes) */
   course?: ThemeId;
 }
@@ -90,6 +100,8 @@ export interface Ball {
   airDur?: number;
   /** temple tunnels: the tunnel the ball just came out of (ignored until it rolls clear) */
   lock?: number;
+  /** going round a loop-the-loop (or falling back out of it) */
+  loop?: { k: number; t: number; dur: number; dir: number; ok: boolean; v: number };
 }
 
 export type SimEventType =
@@ -112,6 +124,8 @@ export type SimEventType =
   | 'land'
   | 'flood' // the tide (or the drawbridge) caught the resting ball
   | 'coin' // n = coin index
+  | 'mill' // n = windmill index: a sail stopped the ball
+  | 'loop' // n = 1 round the loop, 0 not fast enough
   | 'maxed'; // ran out of strokes: picked up
 
 export interface SimEvent {

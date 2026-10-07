@@ -10,15 +10,19 @@ Estado y decisiones: [docs/README.md](docs/README.md). Diseño de la 1.0: [docs/
 
 ```
 src/sim/        Simulación pura (sin 3D), determinista a 1/120 s
-  world.ts        física de la bola sobre una rejilla: suelos, pendientes, paredes, setas, aspas, bloques móviles,
-                  barco, lava, marea, rastrillos, puente levadizo, aceleradores, rampas, túneles, pozos de gravedad,
-                  monedas, mulligan y vista previa del tiro
+  world.ts        física de la bola: suelos, pendientes, paredes curvas, setas, aspas, bloques móviles, barco, lava,
+                  marea, rastrillos, puente levadizo, aceleradores, rampas, túneles, pozos de gravedad, molinos,
+                  rizos, colinas, puentes, monedas, mulligan y vista previa del tiro
+  shape.ts        de la rejilla a curvas: contornos suaves de paredes, borde, estanques, búnkeres y hielo (filetes
+                  concéntricos en los giros, escaleras convertidas en rampas), el suelo fino y lo que hace rebotar
   courses.ts      los 12 recorridos y sus hoyos hechos a mano (mapas ASCII; la leyenda está arriba del archivo)
-  gen.ts          generador de hoyos por plantillas y mecánicas de cada recorrido
+  gen.ts          generador de hoyos por plantillas (rectas, curvas, horquillas, greens redondos…), mecánicas de cada
+                  recorrido y los clásicos del minigolf (molino, rizo, colinas, tubos, puentes, saltos)
   route.ts        la gira de 120 hoyos (orden, dificultad, hoyos de copa) · routeTable.ts: diseño y par medidos (generado)
   daily.ts        reto diario: 6 hoyos de la gira y un modificador · dailyTable.ts: semillas comprobadas (generado)
   bot.ts          bot que busca el mejor golpe simulando cientos de putts
-src/render/     Three.js: placa del hoyo, entorno de cada recorrido, piezas animadas, bola, putter y línea de tiro
+src/render/     Three.js: placa y barandillas siguiendo los contornos, entorno de cada recorrido, piezas animadas
+                (molino, rizo, puentes, tubos), bola, putter y línea de tiro
 src/ui/         HUD, pantallas, tienda (shop.ts), trofeos y vitrina (trophy.ts), iconos
 src/economy.ts  monedas, bolas, línea de tiro, mulligan y premios
 src/monetize/   anuncios y compras: CrazyGames, AdMob + Play Billing en Android, y dobles de prueba
@@ -53,7 +57,7 @@ Requisitos: Node 22 o superior. Para imágenes, vídeos y pruebas, Python 3 con 
 `npm run android:sync` y, en `android/`, `./gradlew assembleDebug` (APK de prueba con anuncios de prueba) o `./gradlew bundleRelease` (AAB firmado). Para la release:
 - `android/keystore.properties` y `android/keystore/wildputt-upload.jks` con la clave de subida (fuera de git; copia en `NO-COMPARTIR\wild-putt`, con instrucciones en su `LEEME.txt`).
 - Ids reales de AdMob en `src/monetize/android.ts` (`REAL_AD_UNITS`, `USE_TEST_ADS = false`) y en el manifest (ya puestos desde la 1.0.0). `RELEASE=1 node build.mjs` se niega a compilar con los de prueba.
-- `versionCode` = 10000 × mayor + 100 × menor + parche (1.0.0 → 10000).
+- `versionCode` = 10000 × mayor + 100 × menor + parche (1.0.0 → 10000, 1.1.0 → 10100).
 
 ## Controles
 
@@ -62,4 +66,4 @@ Requisitos: Node 22 o superior. Para imágenes, vídeos y pruebas, Python 3 con 
 
 ## Cómo se hace un hoyo
 
-Los hoyos a mano son mapas ASCII en `src/sim/courses.ts` (la leyenda completa está arriba del archivo), con el tee abajo y la bandera arriba. Los generados salen de `src/sim/gen.ts`. Después de tocar la física, un hoyo o el generador: `npm run route-table`, `npm run daily-table` y comparar con [docs/dificultad.md](docs/dificultad.md).
+Los hoyos a mano son mapas ASCII en `src/sim/courses.ts` (la leyenda completa está arriba del archivo), con el tee abajo y la bandera arriba. Se dibujan en cuadrícula y el juego los redondea solo (`src/sim/shape.ts`): para ver el resultado sin abrir el juego, `npx tsx tools/shapes-svg.ts carpeta hand`. Los clásicos van en el mapa (`W` molino, `Q` rizo, `b` puente, `P` túneles, `J` rampas) o en la definición (`hills` para las colinas, `mills` para la velocidad de las aspas). Los generados salen de `src/sim/gen.ts`. Después de tocar la física, un hoyo o el generador: `npm run route-table`, `npm run daily-table`, `npx tsx tools/physcheck.ts` y comparar con [docs/dificultad.md](docs/dificultad.md).

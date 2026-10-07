@@ -1,3 +1,4 @@
+import { closest, closestN, DX, DZ, fill, smooth, traceCorners, type Corner, type KeyPt, type Loop, type Prim } from './shape';
 import type { Ball, Ground, HoleDef, HoleMods, SimEvent, SimEventType } from './types';
 import { G } from './types';
 
@@ -24,6 +25,52 @@ const WELL_R = 2.6; // reach of a gravity well
 const WELL_K = 7; // its pull at the centre (cells/s²)
 const WELL_CORE = 0.42; // the black hole in the middle (+1)
 const PORTAL_R = 0.38;
+/** fine samples per cell for the ground (the outlines are smooth, the grid is not) */
+export const FINE = 8;
+const MILL_BLOCK = 0.36; // a sail blocks the door this far (rad) either side of pointing straight down
+const LOOP_MIN = 5.2; // slower than this into a loop-the-loop: it rolls back out
+export const LOOP_R = 0.5;
+const HILL_K = 9; // a mound pushes the ball down its sides: HILL_K × slope (cells/s²)
+
+/** Cells that are more than their ground. */
+export const K_BRIDGE = 1; // 'b': planks over the water, with low rails
+export const K_MILL = 2; // 'W': the windmill's door (and K_HOUSE its walls)
+export const K_HOUSE = 3;
+export const K_LOOP = 4; // 'Q': a loop-the-loop (and K_LOOPWALL beside it)
+export const K_LOOPWALL = 5;
+
+/** The smooth outlines of the hole (shape.ts). */
+export interface Shapes {
+  walls: Loop[];
+  /** the ground under the hole (everything but the void) */
+  land: Loop[];
+  /** ponds (and the water under the bridges) */
+  pond: Loop[];
+  sand: Loop[];
+  ice: Loop[];
+}
+
+export interface Mill {
+  x: number;
+  z: number;
+  /** 0: the ball goes through along x, 1: along z */
+  ax: 0 | 1;
+  /** the side the sails turn on (towards the tee) */
+  front: 1 | -1;
+  speed: number;
+  phase: number;
+}
+export interface LoopQ {
+  x: number;
+  z: number;
+  ax: 0 | 1;
+}
+export interface Hill {
+  x: number;
+  z: number;
+  r: number;
+  h: number;
+}
 
 /** Cells whose ground changes with the hole's clock. */
 const DYN_TIDE = 1;
@@ -110,6 +157,21 @@ export class Sim {
   readonly portals: { x: number; z: number }[] = [];
   /** gravity wells (their black hole is a void cell) */
   readonly wells: { x: number; z: number }[] = [];
+  /** bridges, windmills and loops: K_* per cell */
+  readonly kind: Uint8Array;
+  readonly mills: Mill[] = [];
+  readonly loops: LoopQ[] = [];
+  readonly hills: Hill[] = [];
+  /** smooth outlines, the ground on a fine grid (FINE per cell) and what the ball bounces off */
+  readonly shape: Shapes;
+  readonly fine: Uint8Array;
+  readonly prims: Prim[] = [];
+  /** low rails along the sides of the bridges (also in prims) */
+  readonly rails: { ax: number; az: number; bx: number; bz: number }[] = [];
+  private bucketAt!: Int32Array;
+  /** prims before this index are walls' outlines (with an inside); the rest are rails */
+  private wallPrims = 0;
+  private bucket!: Int32Array;
   /** coins on the green, and the ones the real ball has rolled over this attempt */
   readonly coins: { x: number; z: number }[] = [];
   coinsGot: number[] = [];
@@ -146,11 +208,13 @@ export class Sim {
     this.dyn = new Uint8Array(N);
     this.boost = new Uint8Array(N);
     this.ramp = new Uint8Array(N);
+    this.kind = new Uint8Array(N);
     this.frictionMul = (mods.friction ?? 1) * (def.gravity ?? 1);
     this.cupR = CUP_R * (mods.cup ?? 1);
     let cup = { x: 1.5, z: 1.5 };
     let tee = { x: 1.5, z: this.H - 1.5 };
     const spinCells: { x: number; z: number }[] = [];
+    const millCells: number[] = [];
     let hasLava = false;
     for (let z = 0; z < this.H; z++)
       for (let x = 0; x < this.W; x++) {
@@ -237,6 +301,17 @@ export class Sim {
             g = G.Void;
             this.wells.push({ x: x + 0.5, z: z + 0.5 });
             break;
+          case 'b':
+            this.kind[i] = K_BRIDGE;
+            break;
+          case 'W':
+            this.kind[i] = K_MILL;
+            millCells.push(i);
+            break;
+          case 'Q':
+            this.kind[i] = K_LOOP;
+            this.loops.push({ x: x + 0.5, z: z + 0.5, ax: 1 });
+            break;
           default:
             throw new Error(`Hole ${def.id}: unknown char '${ch}' at ${x},${z}`);
         }
@@ -254,7 +329,7 @@ export class Sim {
         const [dx, dz] = SLOPE_V[k];
         const nx = x + dx;
         const nz = z + dz;
-        if (nx < 0 || nz < 0 || nx >= this.W || nz >= this.H || this.ground[nz * this.W + nx] === G.Void) {
+        if (nx < 0 || nz < 0 || nx >= this.W || nz >= this.H || this.ground[nz * this.W + nx] === G.Void || this.ground[nz * this.W + nx] === G.Water) {
           this.ramp[i] = k;
           break;
         }
@@ -270,6 +345,34 @@ export class Sim {
       const mx = (x: number) => (mods.mirror ? this.W - x : x);
       this.movers.push({ x0: mx(m.x0), z0: m.z0, x1: mx(m.x1), z1: m.z1, hw: m.w / 2, hh: m.h / 2, period: m.period, phase: m.phase ?? 0 });
     }
+    // windmills and loops: which way the ball goes through, and the walls beside them
+    const wallAt = (x: number, z: number) => x >= 0 && z >= 0 && x < this.W && z < this.H && this.ground[z * this.W + x] === G.Wall;
+    const axisOf = (i: number): 0 | 1 => {
+      const x = i % this.W;
+      const z = (i - x) / this.W;
+      return wallAt(x - 1, z) && wallAt(x + 1, z) ? 1 : wallAt(x, z - 1) && wallAt(x, z + 1) ? 0 : 1;
+    };
+    const sides = (i: number, ax: 0 | 1, k: number) => {
+      const x = i % this.W;
+      const z = (i - x) / this.W;
+      for (const s of [-1, 1]) {
+        const nx = x + (ax === 1 ? s : 0);
+        const nz = z + (ax === 0 ? s : 0);
+        if (wallAt(nx, nz)) this.kind[nz * this.W + nx] = k;
+      }
+    };
+    millCells.forEach((i, k) => {
+      const ax = axisOf(i);
+      sides(i, ax, K_HOUSE);
+      const md = def.mills?.[k] ?? { speed: 1.1 };
+      this.mills.push({ x: (i % this.W) + 0.5, z: Math.floor(i / this.W) + 0.5, ax, front: 1, speed: mods.mirror ? -md.speed : md.speed, phase: md.phase ?? 0 });
+    });
+    for (const L of this.loops) {
+      const i = Math.floor(L.z) * this.W + Math.floor(L.x);
+      L.ax = axisOf(i);
+      sides(i, L.ax, K_LOOPWALL);
+    }
+    for (const [hx, hz, r, h] of def.hills ?? []) this.hills.push({ x: mods.mirror ? this.W - hx : hx, z: hz, r, h });
     this.maxStrokes = def.par + 3;
     this.ball = { x: tee.x, z: tee.z, vx: 0, vz: 0, y: 0, state: 'rest' };
     this.lastRest = { ...tee };
@@ -308,6 +411,207 @@ export class Sim {
       }
       this.lavaDist = d;
     }
+    const sh = this.buildShapes();
+    this.shape = sh.shape;
+    this.fine = sh.fine;
+    this.buildBuckets();
+    // the sails turn on the side the ball comes from
+    const pf = this.pathField();
+    for (const m of this.mills) {
+      const cx = Math.floor(m.x);
+      const cz = Math.floor(m.z);
+      const a = m.ax === 0 ? pf[cz * this.W + cx - 1] : pf[(cz - 1) * this.W + cx];
+      const b = m.ax === 0 ? pf[cz * this.W + cx + 1] : pf[(cz + 1) * this.W + cx];
+      m.front = (a ?? 1e9) > (b ?? 1e9) ? -1 : 1;
+    }
+  }
+
+  // ---------- smooth outlines ----------
+  /** Points the outlines must keep clear of. */
+  private keyPoints(): KeyPt[] {
+    const k: KeyPt[] = [
+      { x: this.tee.x, z: this.tee.z, c: 0.34 },
+      { x: this.cup.x, z: this.cup.z, c: this.cupR + 0.14 },
+    ];
+    for (const c of this.coins) k.push({ x: c.x, z: c.z, c: 0.32 });
+    for (const b of this.bumpers) k.push({ x: b.x, z: b.z, c: BUMPER_R + 0.1 });
+    for (const s of this.spinners) k.push({ x: s.x, z: s.z, c: 0.34 });
+    for (const p of this.portals) k.push({ x: p.x, z: p.z, c: 0.48 });
+    for (const w of this.wells) k.push({ x: w.x, z: w.z, c: 0.6 });
+    for (const h of this.hills) k.push({ x: h.x, z: h.z, c: Math.max(0.4, h.r * 0.75) });
+    return k;
+  }
+
+  private buildShapes(): { shape: Shapes; fine: Uint8Array } {
+    const W = this.W;
+    const H = this.H;
+    const at = (x: number, z: number): number => (x < 0 || z < 0 || x >= W || z >= H ? G.Void : this.ground[z * W + x]);
+    // cells whose corners stay square: the moving and special cells
+    const prot = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) if (this.dyn[i] || this.boost[i] || this.ramp[i] || this.kind[i]) prot[i] = 1;
+    const protect = (x: number, z: number) => x >= 0 && z >= 0 && x < W && z < H && prot[z * W + x] === 1;
+    const keys = this.keyPoints();
+    const gk = (x: number, z: number) => z * (W + 1) + x;
+    // walls: wide fillets on the outside of a bend, concentric with the inside one when the bend has both
+    const isWall = (x: number, z: number) => at(x, z) === G.Wall;
+    const wc = traceCorners(W, H, isWall, protect);
+    const wmap = new Map<number, Corner>();
+    for (const l of wc) for (const c of l) wmap.set(gk(c.x, c.z), c);
+    const wr = new Map<Corner, number>();
+    for (const l of wc)
+      for (const c of l) {
+        if (c.turn !== -1 || c.sharp) continue;
+        const dx = DX[c.dout] - DX[c.din];
+        const dz = DZ[c.dout] - DZ[c.din];
+        for (let k = 1; k <= 6; k++) {
+          if (isWall(Math.floor(c.x + dx * (k - 0.5)), Math.floor(c.z + dz * (k - 0.5)))) break;
+          const p = wmap.get(gk(c.x + dx * k, c.z + dz * k));
+          if (!p || p.turn !== 1 || p.sharp || DX[p.din] - DX[p.dout] !== -dx || DZ[p.din] - DZ[p.dout] !== -dz) continue;
+          if (k < 2) break;
+          const ri = Math.max(0.8, Math.min(1.5, 0.3 * k));
+          wr.set(c, k + ri);
+          wr.set(p, Math.min(wr.get(p) ?? ri, ri));
+          break;
+        }
+      }
+    const walls = smooth(wc, { radius: (c) => wr.get(c) ?? (c.turn === 1 ? 0.9 : 2.4), keys, stairs: true });
+    // the ground under the hole: its edge runs parallel to the walls' outline, one cell further out
+    const lc = traceCorners(W, H, (x, z) => at(x, z) !== G.Void, protect);
+    const land = smooth(lc, {
+      radius: (c) => {
+        const vx = DX[c.dout] - DX[c.din];
+        const vz = DZ[c.dout] - DZ[c.din];
+        if (c.turn === 1) {
+          const o = wmap.get(gk(c.x + vx, c.z + vz));
+          if (o && o.turn === -1 && isWall(Math.floor(c.x + vx * 0.5), Math.floor(c.z + vz * 0.5))) return (wr.get(o) ?? 2.4) + 1;
+          return 1.2;
+        }
+        const ii = wmap.get(gk(c.x - vx, c.z - vz));
+        if (ii && ii.turn === 1 && isWall(Math.floor(c.x - vx * 0.5), Math.floor(c.z - vz * 0.5))) return Math.max(0, (wr.get(ii) ?? 0.9) - 1);
+        return 0.5;
+      },
+      keys,
+      stairs: true,
+    });
+    // ponds, bunkers, ice: blobs, square where they meet a wall (the corner goes under the wall's own curve)
+    const sharp = (x: number, z: number) => protect(x, z) || isWall(x, z);
+    const blob = (cell: (x: number, z: number) => boolean, cvx: number, rfx: number) =>
+      smooth(traceCorners(W, H, cell, sharp), { radius: (c) => (c.turn === 1 ? cvx : rfx), keys, protect: sharp, stairs: true });
+    const inMap = (x: number, z: number) => x >= 0 && z >= 0 && x < W && z < H;
+    const pond = blob((x, z) => inMap(x, z) && (at(x, z) === G.Water || this.dyn[z * W + x] === DYN_BRIDGE || this.kind[z * W + x] === K_BRIDGE), 0.9, 0.6);
+    const sand = blob((x, z) => at(x, z) === G.Sand, 0.9, 0.6);
+    const ice = blob((x, z) => at(x, z) === G.Ice, 1.2, 0.8);
+    // the ground on the fine grid
+    const S = FINE;
+    const fine = new Uint8Array(W * S * H * S).fill(G.Green);
+    fill(ice, W, H, S, fine, G.Ice);
+    fill(sand, W, H, S, fine, G.Sand);
+    fill(pond, W, H, S, fine, G.Water);
+    fill(walls, W, H, S, fine, G.Wall);
+    fill(land, W, H, S, fine, G.Void, true);
+    // special cells keep their own ground, square; lava too (where it is not under a wall)
+    for (let i = 0; i < W * H; i++) {
+      const lava = this.ground[i] === G.Lava;
+      if (!prot[i] && !lava) continue;
+      const x = i % W;
+      const z = (i - x) / W;
+      for (let j = 0; j < S; j++)
+        for (let k = 0; k < S; k++) {
+          const f = (z * S + j) * W * S + x * S + k;
+          if (!lava || fine[f] !== G.Wall) fine[f] = this.ground[i];
+        }
+    }
+    // what the ball bounces off: the walls' outlines and the bridges' rails
+    for (const l of walls) for (const p of l.prims) this.prims.push(p);
+    this.wallPrims = this.prims.length;
+    for (let i = 0; i < W * H; i++) {
+      if (this.kind[i] !== K_BRIDGE) continue;
+      const x = i % W;
+      const z = (i - x) / W;
+      for (let d = 0; d < 4; d++) {
+        const nx = x + DX[d];
+        const nz = z + DZ[d];
+        const g = at(nx, nz);
+        if (g !== G.Water && g !== G.Void) continue;
+        if (inMap(nx, nz) && this.kind[nz * W + nx] === K_BRIDGE) continue;
+        // the edge shared with the water
+        const ex = d === 0 ? x + 1 : x;
+        const ez = d === 1 ? z + 1 : z;
+        const r = d === 0 || d === 2 ? { ax: ex, az: z, bx: ex, bz: z + 1 } : { ax: x, az: ez, bx: x + 1, bz: ez };
+        this.rails.push(r);
+        this.prims.push({ k: 0, ...r });
+      }
+    }
+    return { shape: { walls, land, pond, sand, ice }, fine };
+  }
+
+  /** Which outline pieces are near each cell. */
+  private buildBuckets() {
+    const W = this.W;
+    const H = this.H;
+    const M = BALL_R + 0.16;
+    const lists: number[][] = Array.from({ length: W * H }, () => []);
+    this.prims.forEach((p, k) => {
+      let x0: number;
+      let x1: number;
+      let z0: number;
+      let z1: number;
+      if (p.k === 0) {
+        x0 = Math.min(p.ax, p.bx);
+        x1 = Math.max(p.ax, p.bx);
+        z0 = Math.min(p.az, p.bz);
+        z1 = Math.max(p.az, p.bz);
+      } else {
+        x0 = z0 = Infinity;
+        x1 = z1 = -Infinity;
+        for (let i = 0; i <= 12; i++) {
+          const a = p.a0 + (p.sw * i) / 12;
+          const x = p.cx + Math.cos(a) * p.r;
+          const z = p.cz + Math.sin(a) * p.r;
+          x0 = Math.min(x0, x);
+          x1 = Math.max(x1, x);
+          z0 = Math.min(z0, z);
+          z1 = Math.max(z1, z);
+        }
+        // (the sag of the arc between two samples)
+        const sag = p.r * (1 - Math.cos(Math.abs(p.sw) / 24));
+        x0 -= sag;
+        z0 -= sag;
+        x1 += sag;
+        z1 += sag;
+      }
+      for (let z = Math.max(0, Math.floor(z0 - M)); z <= Math.min(H - 1, Math.floor(z1 + M)); z++)
+        for (let x = Math.max(0, Math.floor(x0 - M)); x <= Math.min(W - 1, Math.floor(x1 + M)); x++) lists[z * W + x].push(k);
+    });
+    this.bucketAt = new Int32Array(W * H + 1);
+    let n = 0;
+    lists.forEach((l, i) => {
+      this.bucketAt[i] = n;
+      n += l.length;
+    });
+    this.bucketAt[W * H] = n;
+    this.bucket = new Int32Array(n);
+    lists.forEach((l, i) => this.bucket.set(l, this.bucketAt[i]));
+  }
+
+  /** Distance from (x, z) to the nearest wall or rail within reach (capped at 1). */
+  wallDist(x: number, z: number): number {
+    const cx = Math.floor(x);
+    const cz = Math.floor(z);
+    if (cx < 0 || cz < 0 || cx >= this.W || cz >= this.H) return 0;
+    const i = cz * this.W + cx;
+    let d = 1;
+    for (let k = this.bucketAt[i]; k < this.bucketAt[i + 1]; k++) {
+      const [px, pz] = closest(this.prims[this.bucket[k]], x, z);
+      d = Math.min(d, Math.hypot(x - px, z - pz));
+    }
+    return d;
+  }
+
+  /** Ground on the fine grid (static: no tide, no drawbridge). */
+  fineAt(x: number, z: number): Ground {
+    if (x < 0 || z < 0 || x >= this.W || z >= this.H) return G.Void;
+    return this.fine[Math.floor(z * FINE) * this.W * FINE + Math.floor(x * FINE)] as Ground;
   }
 
   // ---------- helpers ----------
@@ -318,7 +622,9 @@ export class Sim {
     const cx = Math.floor(x);
     const cz = Math.floor(z);
     if (cx < 0 || cz < 0 || cx >= this.W || cz >= this.H) return G.Void;
-    return this.ground[cz * this.W + cx] as Ground;
+    // (the lava spreads cell by cell)
+    if (this.ground[cz * this.W + cx] === G.Lava) return G.Lava;
+    return this.fine[Math.floor(z * FINE) * this.W * FINE + Math.floor(x * FINE)] as Ground;
   }
   slopeAt(x: number, z: number): number {
     const cx = Math.floor(x);
@@ -363,17 +669,36 @@ export class Sim {
     const i = cz * this.W + cx;
     const k = this.dyn[i];
     if ((k === DYN_TIDE || k === DYN_BRIDGE) && this.floodUp(k, t)) return G.Water;
-    return this.ground[i] as Ground;
+    return this.groundAt(x, z);
   }
-  /** A cell the ball bounces off at time t (walls, and portcullises while they are down). */
+  /** A portcullis cell that is down at time t (the walls themselves are smooth outlines: see prims). */
   solid(cx: number, cz: number, t: number): boolean {
     if (cx < 0 || cz < 0 || cx >= this.W || cz >= this.H) return false;
-    const i = cz * this.W + cx;
-    return this.ground[i] === G.Wall || this.gateDown(this.dyn[i], t);
+    return this.gateDown(this.dyn[cz * this.W + cx], t);
   }
   /** Cells where a ball must not be put back after a penalty (or left by the bot). */
   unsafe(i: number): boolean {
-    return !!(this.slope[i] || this.dyn[i] || this.boost[i] || this.ramp[i]) || this.portals.some((p) => Math.floor(p.z) * this.W + Math.floor(p.x) === i);
+    const k = this.kind[i];
+    return !!(this.slope[i] || this.dyn[i] || this.boost[i] || this.ramp[i] || k === K_MILL || k === K_LOOP) || this.portals.some((p) => Math.floor(p.z) * this.W + Math.floor(p.x) === i);
+  }
+  /** A windmill's sail is down across its door at time t. */
+  millBlocked(m: Mill, t: number): boolean {
+    const q = Math.PI / 2;
+    const u = ((((m.phase + m.speed * t + q) % q) + q) % q);
+    return Math.min(u, q - u) < MILL_BLOCK;
+  }
+  /** The windmill's sails' angle (for the visuals): a sail points straight down when this is −π/2 (mod π/2). */
+  millAngle(m: Mill, t: number): number {
+    return m.phase + m.speed * t;
+  }
+  /** Height of the ground (the mounds) at (x, z). */
+  heightAt(x: number, z: number): number {
+    let y = 0;
+    for (const h of this.hills) {
+      const d = Math.hypot(x - h.x, z - h.z);
+      if (d < h.r) y += h.h * 0.5 * (1 + Math.cos((Math.PI * d) / h.r));
+    }
+    return y;
   }
 
   /** The deck's sideways tilt right now (ship), as an acceleration along x. */
@@ -394,6 +719,16 @@ export class Sim {
     const sv = SLOPE_V[this.slopeAt(x, z)];
     let ax = sv[0] * SLOPE_ACC + this.swayAt(t);
     let az = sv[1] * SLOPE_ACC;
+    for (const h of this.hills) {
+      const dx = x - h.x;
+      const dz = z - h.z;
+      const d = Math.hypot(dx, dz);
+      if (d >= h.r || d < 1e-6) continue;
+      // down the side of the mound
+      const a = HILL_K * h.h * (Math.PI / (2 * h.r)) * Math.sin((Math.PI * d) / h.r);
+      ax += (dx / d) * a;
+      az += (dz / d) * a;
+    }
     const w = this.mods.wind;
     if (w) {
       ax += w.x;
@@ -411,6 +746,7 @@ export class Sim {
    * (the real ball); the bot's imaginary balls run silently.
    */
   integrate(b: Ball, t: number, dt: number, fx = false): Outcome {
+    if (b.loop) return this.loopStep(b, dt);
     // in the air (a ramp jump): no friction, no slopes, no hazards until it lands
     if (b.air && b.air > 0) {
       b.air -= dt;
@@ -491,6 +827,14 @@ export class Sim {
     b.x += b.vx * dt;
     b.z += b.vz * dt;
     this.collide(b, t, dt, fx);
+    if (this.fineAt(b.x, b.z) === G.Wall && this.wallDist(b.x, b.z) >= 1) {
+      // deep inside a wall (never by rolling): back onto the green
+      const p = this.safeSpot(b.x, b.z);
+      b.x = p.x;
+      b.z = p.z;
+      b.vx *= 0.3;
+      b.vz *= 0.3;
+    }
     const ci = Math.floor(b.z) * this.W + Math.floor(b.x);
     const inMap = b.x >= 0 && b.z >= 0 && b.x < this.W && b.z < this.H;
     // boosters: at least BOOST_SPEED in their direction, and most of the sideways speed goes
@@ -516,6 +860,21 @@ export class Sim {
         if (fx) this.emit('jump', b.x, b.z, dur);
         return 'roll';
       }
+    }
+    // loop-the-loop: round it if fast enough, otherwise it rolls back out
+    for (let k = 0; k < this.loops.length; k++) {
+      const L = this.loops[k];
+      const s = L.ax === 0 ? b.x - L.x : b.z - L.z;
+      const lat = L.ax === 0 ? b.z - L.z : b.x - L.x;
+      if (Math.abs(s) >= 0.42 || Math.abs(lat) >= 0.5) continue;
+      const va = L.ax === 0 ? b.vx : b.vz;
+      const v = Math.abs(va);
+      const ok = v >= LOOP_MIN;
+      const dir = va > 0 || (va === 0 && s < 0) ? 1 : -1;
+      const th = Math.PI * Math.min(0.92, (v / LOOP_MIN) ** 2);
+      b.loop = { k, t: 0, dur: ok ? Math.max(0.45, (1 + 2 * Math.PI * LOOP_R) / (0.8 * v)) : 0.45 + 0.35 * (th / Math.PI), dir, ok, v };
+      if (fx) this.emit('loop', L.x, L.z, ok ? 1 : 0);
+      return this.loopStep(b, 0);
     }
     // tunnels: in through one, out of its pair with the same speed
     if (this.portals.length) {
@@ -563,6 +922,49 @@ export class Sim {
     return 'roll';
   }
 
+  /** Round the loop (or up it and back): the ball follows the track; it comes out on the far side, or back. */
+  private loopStep(b: Ball, dt: number): Outcome {
+    const lp = b.loop!;
+    const L = this.loops[lp.k];
+    lp.t += dt;
+    const u = Math.min(1, lp.t / lp.dur);
+    let s: number;
+    let y: number;
+    if (lp.ok) {
+      s = -0.5 + u + LOOP_R * Math.sin(2 * Math.PI * u);
+      y = LOOP_R * (1 - Math.cos(2 * Math.PI * u));
+    } else {
+      const th = Math.PI * Math.min(0.92, (lp.v / LOOP_MIN) ** 2) * Math.sin(Math.PI * u);
+      s = -0.5 + LOOP_R * Math.sin(th);
+      y = LOOP_R * (1 - Math.cos(th));
+    }
+    const ux = L.ax === 0 ? lp.dir : 0;
+    const uz = L.ax === 0 ? 0 : lp.dir;
+    b.x = L.x + ux * s;
+    b.z = L.z + uz * s;
+    b.y = y;
+    // (the speed along the track, for the rolling ball and the trail)
+    const v = lp.ok ? lp.v * 0.85 : lp.v * Math.cos(Math.PI * u);
+    b.vx = ux * v;
+    b.vz = uz * v;
+    if (u < 1) return 'roll';
+    b.y = 0;
+    b.loop = undefined;
+    if (lp.ok) {
+      b.x = L.x + ux * 0.52;
+      b.z = L.z + uz * 0.52;
+      b.vx = ux * lp.v * 0.78;
+      b.vz = uz * lp.v * 0.78;
+    } else {
+      const back = Math.max(1.6, lp.v * 0.7);
+      b.x = L.x - ux * 0.52;
+      b.z = L.z - uz * 0.52;
+      b.vx = -ux * back;
+      b.vz = -uz * back;
+    }
+    return 'roll';
+  }
+
   private bounce(b: Ball, nx: number, nz: number, rest: number, ovx = 0, ovz = 0): number {
     // reflect the velocity relative to the obstacle along the contact normal
     const rvx = b.vx - ovx;
@@ -580,8 +982,10 @@ export class Sim {
 
   private collide(b: Ball, t: number, dt: number, fx: boolean) {
     const R = BALL_R;
-    // walls: the solid grid cells around the ball (twice, for corners)
-    for (let it = 0; it < 2; it++) {
+    // walls: the smooth outlines near the ball, the portcullises that are down and the windmills' sails (twice, for
+    // corners)
+    const walls = (its: number, ev: boolean) => {
+    for (let it = 0; it < its; it++) {
       const x0 = Math.floor(b.x - R);
       const x1 = Math.floor(b.x + R);
       const z0 = Math.floor(b.z - R);
@@ -589,6 +993,59 @@ export class Sim {
       let best = 0;
       let bnx = 0;
       let bnz = 0;
+      let rest = 0.72;
+      let sail = -1;
+      const cx0 = Math.floor(b.x);
+      const cz0 = Math.floor(b.z);
+      if (cx0 >= 0 && cz0 >= 0 && cx0 < this.W && cz0 < this.H) {
+        const i = cz0 * this.W + cx0;
+        let near = Infinity;
+        let nIn = false;
+        let nnx = 0;
+        let nnz = 0;
+        for (let k = this.bucketAt[i]; k < this.bucketAt[i + 1]; k++) {
+          const pk = this.bucket[k];
+          const [px, pz, ox, oz] = closestN(this.prims[pk], b.x, b.z);
+          const dx = b.x - px;
+          const dz = b.z - pz;
+          const d = Math.hypot(dx, dz);
+          if (d < near) {
+            near = d;
+            // (the bridges' rails have no inside)
+            nIn = pk < this.wallPrims && dx * ox + dz * oz < 0;
+            nnx = ox;
+            nnz = oz;
+          }
+          if (d >= R || d < 1e-9 || R - d <= best) continue;
+          best = R - d;
+          bnx = dx / d;
+          bnz = dz / d;
+        }
+        // the centre ended up inside a wall (squeezed in by a sliding block): straight back out
+        if (nIn) {
+          best = R + near;
+          bnx = nnx;
+          bnz = nnz;
+        }
+      }
+      this.mills.forEach((m, k) => {
+        if (!this.millBlocked(m, t)) return;
+        // the sail: a board right across the front of the door
+        const fx0 = m.ax === 0 ? m.x + m.front * 0.5 : m.x - 0.5;
+        const fz0 = m.ax === 0 ? m.z - 0.5 : m.z + m.front * 0.5;
+        const fx1 = m.ax === 0 ? fx0 : m.x + 0.5;
+        const fz1 = m.ax === 0 ? m.z + 0.5 : fz0;
+        const [px, pz] = closest({ k: 0, ax: fx0, az: fz0, bx: fx1, bz: fz1 }, b.x, b.z);
+        const dx = b.x - px;
+        const dz = b.z - pz;
+        const d = Math.hypot(dx, dz);
+        if (d >= R + 0.06 || d < 1e-9 || R + 0.06 - d <= best) return;
+        best = R + 0.06 - d;
+        bnx = dx / d;
+        bnz = dz / d;
+        rest = 0.5;
+        sail = k;
+      });
       for (let cz = z0; cz <= z1; cz++)
         for (let cx = x0; cx <= x1; cx++) {
           if (!this.solid(cx, cz, t)) continue;
@@ -609,17 +1066,22 @@ export class Sim {
             best = pen;
             bnx = dx / d;
             bnz = dz / d;
+            rest = 0.72;
+            sail = -1;
           }
         }
       if (best <= 0) break;
       b.x += bnx * best;
       b.z += bnz * best;
-      const v = this.bounce(b, bnx, bnz, 0.72);
-      if (fx && v > 0.8 && t - this.lastWallT > 0.08) {
+      const v = this.bounce(b, bnx, bnz, rest);
+      if (ev && v > 0.8 && t - this.lastWallT > 0.08) {
         this.lastWallT = t;
-        this.emit('wall', b.x, b.z, v);
+        if (sail >= 0) this.emit('mill', b.x, b.z, sail);
+        else this.emit('wall', b.x, b.z, v);
       }
     }
+    };
+    walls(2, fx);
     // bumpers: bouncy round posts
     this.bumpers.forEach((p, k) => {
       const dx = b.x - p.x;
@@ -707,6 +1169,17 @@ export class Sim {
       }
       void dt;
     });
+    // whatever pushed the ball (a sliding block, a beam), the walls have the last word
+    if (this.movers.length || this.spinners.length || this.bumpers.length) walls(1, false);
+    // squeezed between a sliding block and a wall: it pops out past the block's side
+    for (const m of this.movers) {
+      const p = this.moverPos(m, t);
+      const qx = Math.max(p.x - m.hw, Math.min(b.x, p.x + m.hw));
+      const qz = Math.max(p.z - m.hh, Math.min(b.z, p.z + m.hh));
+      if (Math.hypot(b.x - qx, b.z - qz) >= R - 0.03) continue;
+      if (Math.abs(p.vx) >= Math.abs(p.vz)) b.z = b.z < p.z ? p.z - m.hh - R : p.z + m.hh + R;
+      else b.x = b.x < p.x ? p.x - m.hw - R : p.x + m.hw + R;
+    }
     // never leave the map
     b.x = Math.max(R, Math.min(this.W - R, b.x));
     b.z = Math.max(R, Math.min(this.H - R, b.z));
@@ -925,7 +1398,7 @@ export class Sim {
           const nz = z + dz * k;
           if (nx < 0 || nz < 0 || nx >= this.W || nz >= this.H) break;
           const j = nz * this.W + nx;
-          if (this.ground[j] === G.Void) continue;
+          if (this.ground[j] === G.Void || this.ground[j] === G.Water) continue;
           if (this.ground[j] === G.Green || this.ground[j] === G.Sand || this.ground[j] === G.Ice) add(j, i, k);
           break;
         }
@@ -972,30 +1445,58 @@ export class Sim {
     return Math.atan2(tz - z, tx - x);
   }
 
-  /** Nearest cell centre (from x,z) where a ball can rest safely. */
-  safeSpot(x: number, z: number): { x: number; z: number } {
-    const ok = (gx: number, gz: number) => {
-      if (gx < 0 || gz < 0 || gx >= this.W || gz >= this.H) return false;
-      const g = this.ground[gz * this.W + gx];
-      return g === G.Green || g === G.Sand || g === G.Ice;
-    };
+  /** Can a ball rest at (x, z): on safe ground all round, clear of the walls, not on the side of a mound. */
+  restable(x: number, z: number): boolean {
     const cx = Math.floor(x);
     const cz = Math.floor(z);
-    if (ok(cx, cz) && !this.unsafe(cz * this.W + cx)) {
-      // stay where it was, but clear of the walls
-      return { x: Math.max(cx + BALL_R + 0.02, Math.min(cx + 1 - BALL_R - 0.02, x)), z: Math.max(cz + BALL_R + 0.02, Math.min(cz + 1 - BALL_R - 0.02, z)) };
+    if (cx < 0 || cz < 0 || cx >= this.W || cz >= this.H) return false;
+    const i = cz * this.W + cx;
+    const g0 = this.ground[i];
+    if ((g0 !== G.Green && g0 !== G.Sand && g0 !== G.Ice) || this.unsafe(i)) return false;
+    for (const [ox, oz] of [
+      [0, 0],
+      [0.26, 0],
+      [-0.26, 0],
+      [0, 0.26],
+      [0, -0.26],
+    ]) {
+      const g = this.fineAt(x + ox, z + oz);
+      if (g !== G.Green && g !== G.Sand && g !== G.Ice) return false;
     }
+    if (this.wallDist(x, z) < BALL_R + 0.04) return false;
+    if (this.hills.length) {
+      const [ax, az] = this.external(x, z, 0);
+      if (Math.hypot(ax - this.swayAt(0), az) >= STATIC * 0.9) return false;
+    }
+    return true;
+  }
+
+  /** Nearest point (from x,z) where a ball can rest safely. */
+  safeSpot(x: number, z: number): { x: number; z: number } {
+    const cx = Math.floor(x);
+    const cz = Math.floor(z);
+    if (this.restable(x, z)) return { x, z };
+    // the same cell, a little further from its edges
+    const cl = { x: Math.max(cx + 0.3, Math.min(cx + 0.7, x)), z: Math.max(cz + 0.3, Math.min(cz + 0.7, z)) };
+    if (this.restable(cl.x, cl.z)) return cl;
     let best = { x: this.tee.x, z: this.tee.z };
     let bd = Infinity;
     for (let gz = 0; gz < this.H; gz++)
-      for (let gx = 0; gx < this.W; gx++) {
-        if (!ok(gx, gz) || this.unsafe(gz * this.W + gx)) continue;
-        const d = Math.hypot(gx + 0.5 - x, gz + 0.5 - z) + Math.hypot(gx + 0.5 - this.cup.x, gz + 0.5 - this.cup.z) * 0.02;
-        if (d < bd) {
+      for (let gx = 0; gx < this.W; gx++)
+        for (const [ox, oz] of [
+          [0.5, 0.5],
+          [0.27, 0.27],
+          [0.73, 0.27],
+          [0.27, 0.73],
+          [0.73, 0.73],
+        ]) {
+          const px = gx + ox;
+          const pz = gz + oz;
+          const d = Math.hypot(px - x, pz - z) + Math.hypot(px - this.cup.x, pz - this.cup.z) * 0.02 + (ox === 0.5 ? 0 : 0.05);
+          if (d >= bd || !this.restable(px, pz)) continue;
           bd = d;
-          best = { x: gx + 0.5, z: gz + 0.5 };
+          best = { x: px, z: pz };
         }
-      }
     return best;
   }
 

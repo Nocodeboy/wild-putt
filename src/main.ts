@@ -932,6 +932,13 @@ function handleEvent(ev: SimEvent) {
       floater(t('tFlood'), ev.x, 1, ev.z, 'bad');
       if (vib) vibrate([30, 30, 40]);
       break;
+    case 'mill':
+      audio.play('mill');
+      if (vib) vibrate(14);
+      break;
+    case 'loop':
+      audio.play('loop', ev.n ?? 0);
+      break;
     case 'coin':
       audio.play('coin');
       floater('+5', ev.x, 0.8, ev.z, 'good');
@@ -1372,6 +1379,12 @@ function tick(dt: number) {
   startPlay,
   showRoute,
   champLevel,
+  /** play a hole definition in place of the one on screen (testing only) */
+  testDef(def: HoleDef) {
+    sim = new Sim(def);
+    stage.setLevel(sim, courseOf(def));
+    applyLooks(false);
+  },
   /** jump to a hole of the daily round (testing only) */
   goHole(i: number) {
     if (current?.kind !== 'daily') return;
