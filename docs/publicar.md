@@ -168,7 +168,7 @@ Las monedas solo compran bolas (aspecto) y la línea de tiro más larga, que no 
 | Repositorio | `Nocodeboy/wild-putt` (privado) | — |
 | Web | **Publicada** en https://wild-putt.vercel.app (4 oct 2026) | Proyecto `wild-putt` en Vercel (equipo *nocodeboy's projects*), **conectado al repositorio**: cada push a `main` se publica solo (`vercel.json` en la raíz, `node build.mjs --web`). `/privacidad` y `/app-ads.txt` en línea |
 | CrazyGames | Zip, portadas y vídeos listos | OK para subirlo y aceptar los términos del portal |
-| Google Play | **Enviada a revisión** el 4 oct 2026 (Google tarda hasta 7 días; publicación gestionada desactivada, así que sale sola al aprobarse) | App *Wild Putt: Mini Golf Tour* (id `4975510067456388227`), juego gratuito, `com.nocodeboy.wildputt` |
+| Google Play | 1.0.0 **publicada** el 6 oct 2026; **1.1.0 en revisión** desde el 7 oct (§7). Publicación gestionada desactivada, así que cada versión sale sola al aprobarse | App *Wild Putt: Mini Golf Tour* (id `4975510067456388227`), juego gratuito, `com.nocodeboy.wildputt` |
 | Analítica | Fila `wildputt` creada en Supabase | — |
 
 ### Google Play, hecho (4 oct 2026, con el OK de Germán)
@@ -189,9 +189,9 @@ Las monedas solo compran bolas (aspecto) y la línea de tiro más larga, que no 
 - Cuando esté publicada: `playLive: true` en los `src/crosspromo.ts` de los otros juegos y en la página del estudio (§5).
 - Capturas de tableta (opcionales): se pueden añadir las mismas seis para tabletas de 7 y 10 pulgadas.
 
-## 7. Actualización 1.1.0: curvas y clásicos del minigolf (preparada el 7 oct 2026)
+## 7. Actualización 1.1.0: curvas y clásicos del minigolf (7 oct 2026)
 
-Todo listo en la rama `curvas-y-clasicos`. **Nada publicado todavía:** al juntarla con `main` la web se publica sola, así que se espera al OK de Germán. Igual para el envío a Google Play.
+**Estado (7 oct, 19:40, con el OK de Germán):** la rama `curvas-y-clasicos` está en `main` y la web ya sirve la 1.1.0. En Google Play, la versión 10100 (lanzamiento completo) y las capturas nuevas de la ficha en los tres idiomas están **en revisión**: pasaron las comprobaciones rápidas y salen solas al aprobarse (publicación gestionada desactivada). CrazyGames sigue esperando el OK.
 
 **Google Play** (Producción → Crear versión nueva):
 1. AAB `wild-putt-1.1.0.aab` (versionCode **10100**), firmado con la misma clave de subida. Copia en `publicacion\wild-putt\google-play\`.
@@ -213,8 +213,8 @@ Todo listo en la rama `curvas-y-clasicos`. **Nada publicado todavía:** al junta
    • Trazados nuevos: curvas largas, eses, horquillas y greens redondos
    • Pares medidos de nuevo en los 120 hoyos
    ```
-3. Ficha (inglés, es-ES y es-419): cambiar las seis capturas por las de `assets/play/` (molino, rizo, cañón, volcán, neón, puente; en ese orden) y el gráfico de cabecera. Los textos no cambian.
-4. Lanzamiento completo en los mismos países. Enviar a revisión **solo con el OK de Germán**.
+3. Ficha (inglés, es-ES y es-419): se cambiaron las 7 capturas con titular por **8 nuevas del mismo estilo**, hechas con la 1.1.0 desde el repositorio del estudio (`nocodeboy-games`: `tools/store_graphics/wild-putt.json` y `wild-putt-capture.py`, archivos en `assets/play-2026-10/wild-putt/`): tejados, molino, rizo, lava, salto sobre el agua, barco pirata, Luna y «120 hoyos, 12 recorridos». En el portátil están en `publicacion\wild-putt\google-play\ficha-1.1.0\`. La portada (ilustración de Magnific), el icono y los textos no cambian. Las capturas sin titular de `assets/play/` (`capturas-1.1.0` en el portátil) no se subieron: la ficha ya usaba el estilo con titular.
+4. Lanzamiento completo en los mismos países. Enviado a revisión el 7 oct con el OK de Germán.
 
 **Web:** al juntar la rama con `main`, Vercel publica la 1.1.0 (también `og.png`). **CrazyGames:** el zip y las portadas nuevas sustituyen a los de la 1.0.0 cuando se suba.
 
