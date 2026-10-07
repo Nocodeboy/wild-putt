@@ -85,12 +85,12 @@ def splash():
 
 # phone screenshots for the listing (docs/publicar.md §4): a hole of each of six courses in play, with the HUD
 STORE_SHOTS = [
-    (55, 'shot1-neon.png'),
-    (67, 'shot2-canyon.png'),
-    (44, 'shot3-castle.png'),
-    (21, 'shot4-volcano.png'),
-    (35, 'shot5-temple.png'),
-    (81, 'shot6-moon.png'),
+    (6, 'shot1-windmill.png'),
+    (32, 'shot2-loop.png'),
+    (67, 'shot3-canyon.png'),
+    (60, 'shot4-volcano.png'),
+    (55, 'shot5-neon.png'),
+    (116, 'shot6-bridge.png'),
 ]
 
 
